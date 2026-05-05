@@ -17,9 +17,10 @@ final class ChatwootPublicMessageSenderDto {
   final String? thumbnail;
 
   factory ChatwootPublicMessageSenderDto.fromJson(Json json) {
+    final name = json['name'] as String? ?? json['available_name'] as String? ?? '';
     return ChatwootPublicMessageSenderDto(
       id: (json['id'] as num).toInt(),
-      name: json['name'] as String,
+      name: name,
       avatarUrl: json['avatar_url'] as String?,
       thumbnail: json['thumbnail'] as String?,
     );

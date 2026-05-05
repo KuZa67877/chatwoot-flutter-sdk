@@ -110,7 +110,7 @@ class ConversationListPage extends StatelessWidget {
         ),
       ),
     );
-    // await client.refreshConversations();
+    await client.refreshConversations();
   }
 
   Future<void> _startNewConversation(BuildContext context) async {
@@ -136,7 +136,7 @@ class ConversationListPage extends StatelessWidget {
             tooltip: 'Обновить',
             onPressed: () async {
               try {
-                // await client.refreshConversations();
+                await client.refreshConversations();
               } catch (e) {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -209,14 +209,7 @@ class _ConversationChatPageState extends State<ConversationChatPage> {
   final TextEditingController _input = TextEditingController();
   final ScrollController _scroll = ScrollController();
 
-  bool _loading = true;
   bool _sending = false;
-  Object? _loadError;
-
-  @override
-  void initState() {
-    super.initState();
-  }
 
   @override
   void dispose() {
@@ -252,85 +245,106 @@ class _ConversationChatPageState extends State<ConversationChatPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Чат #${widget.conversationId}'),
-      ),
-      body: StreamBuilder(
-          stream: widget.client.conversations.map((e) => e.firstWhere((item) => item.id == widget.conversationId)),
-          builder: (context, asyncSnapshot) {
-            final messages = asyncSnapshot.data?.messages ?? [];
+    final id = widget.conversationId;
+    return StreamBuilder<ChatwootConversation?>(
+      stream: widget.client.conversations.map((list) {
+        for (final c in list) {
+          if (c.id == id) {
+            return c;
+          }
+        }
+        return null;
+      }),
+      builder: (context, snap) {
+        final conv = snap.data;
+        final messages = conv?.messages ?? [];
 
-            return Column(
+        return Scaffold(
+          appBar: AppBar(
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: ListView.builder(
-                    controller: _scroll,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    itemCount: messages.length,
-                    itemBuilder: (context, index) {
-                      final m = messages[index];
-                      final outgoing = m is ChatwootMessage$Outgoing;
-                      final bg = outgoing
-                          ? Theme.of(context).colorScheme.primaryContainer
-                          : Theme.of(context).colorScheme.surfaceContainerHighest;
-                      return Align(
-                        alignment: outgoing ? Alignment.centerRight : Alignment.centerLeft,
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: MediaQuery.sizeOf(context).width * 0.82,
-                          ),
-                          child: Card(
-                            color: bg,
-                            margin: const EdgeInsets.symmetric(vertical: 4),
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Text(m.content ?? ''),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
+                Text('Чат #$id'),
+                if (conv?.supportTyping == true)
+                  Text(
+                    'Собеседник печатает…',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
-                ),
-                SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _input,
-                            minLines: 1,
-                            maxLines: 5,
-                            textCapitalization: TextCapitalization.sentences,
-                            decoration: const InputDecoration(
-                              hintText: 'Сообщение…',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                            onSubmitted: (_) => _send(),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton.filled(
-                          onPressed: _sending ? null : _send,
-                          icon: _sending
-                              ? const SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.send),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
               ],
-            );
-          }),
+            ),
+          ),
+          body: Column(
+            children: [
+              Expanded(
+                child: ListView.builder(
+                  controller: _scroll,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  itemCount: messages.length,
+                  itemBuilder: (context, index) {
+                    final m = messages[index];
+                    final outgoing = m is ChatwootMessage$Outgoing;
+                    final bg = outgoing
+                        ? Theme.of(context).colorScheme.primaryContainer
+                        : Theme.of(context).colorScheme.surfaceContainerHighest;
+                    return Align(
+                      alignment: outgoing ? Alignment.centerRight : Alignment.centerLeft,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: MediaQuery.sizeOf(context).width * 0.82,
+                        ),
+                        child: Card(
+                          color: bg,
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text(m.content ?? ''),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _input,
+                          minLines: 1,
+                          maxLines: 5,
+                          textCapitalization: TextCapitalization.sentences,
+                          decoration: const InputDecoration(
+                            hintText: 'Сообщение…',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          onSubmitted: (_) => _send(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton.filled(
+                        onPressed: _sending ? null : _send,
+                        icon: _sending
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.send),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
