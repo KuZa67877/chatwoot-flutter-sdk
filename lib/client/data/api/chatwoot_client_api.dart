@@ -2,7 +2,7 @@ import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_contact_session_dto.da
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_contact_session_update_dto.dart';
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_conversation_dto.dart';
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_message_dto.dart';
-import 'package:chatwoot_sdk/client/domain/model/attachment.dart';
+import 'package:chatwoot_sdk/client/domain/model/message/attachment.dart';
 
 abstract interface class ChatwootClientApi {
   Future<ChatwootContactSessionDto> createContactSession({
@@ -52,6 +52,6 @@ abstract interface class ChatwootClientApi {
     int conversationId, {
     String? content,
     String? echoId,
-    List<Attachment$Local> attachments = const [],
+    List<Attachment$File> attachments = const [],
   });
 }

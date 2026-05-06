@@ -287,6 +287,8 @@ class _ConversationChatPageState extends State<ConversationChatPage> {
                     final bg = outgoing
                         ? Theme.of(context).colorScheme.primaryContainer
                         : Theme.of(context).colorScheme.surfaceContainerHighest;
+                    final failed = outgoing && m.status == OutgoingMessageStatus.failed;
+                    final echoId = outgoing ? m.echoId : null;
                     return Align(
                       alignment: outgoing ? Alignment.centerRight : Alignment.centerLeft,
                       child: ConstrainedBox(
@@ -298,7 +300,42 @@ class _ConversationChatPageState extends State<ConversationChatPage> {
                           margin: const EdgeInsets.symmetric(vertical: 4),
                           child: Padding(
                             padding: const EdgeInsets.all(12),
-                            child: Text(m.content ?? ''),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(m.content ?? ''),
+                                if (outgoing && m.status == OutgoingMessageStatus.sending)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Text(
+                                      'Отправка…',
+                                      style: Theme.of(context).textTheme.labelSmall,
+                                    ),
+                                  ),
+                                if (failed && echoId != null)
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: TextButton(
+                                      onPressed: () async {
+                                        try {
+                                          // await widget.client.retryMessage(
+                                          //   conversationId: widget.conversationId,
+                                          //   echoId: echoId,
+                                          // );
+                                        } catch (e) {
+                                          if (context.mounted) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text('Повтор не удался: $e')),
+                                            );
+                                          }
+                                        }
+                                      },
+                                      child: const Text('Повторить отправку'),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
                       ),

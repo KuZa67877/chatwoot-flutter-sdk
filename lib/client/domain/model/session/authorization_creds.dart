@@ -8,13 +8,13 @@ class AuthorizationCreds {
     required this.name,
     required this.email,
     required this.phoneNumber,
-    required this.customAttributes,
+    this.customAttributes = const {},
   });
 
-  final String identifier;
-  final String identifierHash;
-  final String name;
-  final String email;
-  final String phoneNumber;
+  final String? identifier;
+  final String? identifierHash;
+  final String? name;
+  final String? email;
+  final String? phoneNumber;
   final Map<String, Object> customAttributes;
 }

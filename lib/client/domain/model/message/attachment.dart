@@ -6,8 +6,8 @@ sealed class Attachment {
   const Attachment();
 }
 
-class Attachment$Local extends Attachment {
-  const Attachment$Local({
+class Attachment$File extends Attachment {
+  const Attachment$File({
     required this.file,
   });
 
@@ -16,8 +16,8 @@ class Attachment$Local extends Attachment {
   String toString() => 'Attachment\$Local(file: ${file.name})';
 }
 
-class Attachment$Remote extends Attachment {
-  const Attachment$Remote({
+class Attachment$Link extends Attachment {
+  const Attachment$Link({
     required this.url,
     this.thumbnail,
   });

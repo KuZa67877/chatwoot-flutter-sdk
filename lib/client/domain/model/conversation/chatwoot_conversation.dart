@@ -1,6 +1,6 @@
 import 'package:meta/meta.dart';
 
-import 'chatwoot_message.dart';
+import '../message/chatwoot_message.dart';
 
 enum ChatwootConversationStatus {
   open,
@@ -8,6 +8,8 @@ enum ChatwootConversationStatus {
   pending,
   snoozed,
 }
+
+extension type ChatwootConversationId(int value) implements int {}
 
 @immutable
 class ChatwootConversation {
@@ -18,17 +20,18 @@ class ChatwootConversation {
     this.supportTyping = false,
   });
 
-  final int id;
+  final ChatwootConversationId id;
   final ChatwootConversationStatus status;
   final List<ChatwootMessage> messages;
 
-  /// Саппорт печатает в этом диалоге (ActionCable `conversation.typing_on` / off, клиентский таймаут).
+  /// Support is typing in this conversation.
   final bool supportTyping;
 
   ChatwootConversation copyWith({
     List<ChatwootMessage>? messages,
     ChatwootConversationStatus? status,
     bool? supportTyping,
+    bool? canReply,
   }) {
     return ChatwootConversation(
       id: id,

@@ -9,6 +9,7 @@ class ChatwootContact {
     this.phoneNumber,
   });
 
+  /// ID of the contact in the Chatwoot system.
   final int id;
   final String? name;
   final String? email;

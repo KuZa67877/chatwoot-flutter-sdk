@@ -7,10 +7,10 @@ import 'package:meta/meta.dart';
 /// Внутреннее представление известных ActionCable-событий (SDK не отдаёт наружу).
 ///
 /// Envelope: `{ event: name, data: { ... } }` ([ActionCableBroadcastJob] v4.8.0).
-sealed class ChatwootEvent {
-  const ChatwootEvent();
+sealed class ChatwootEventOld {
+  const ChatwootEventOld();
 
-  factory ChatwootEvent.fromEnvelope(
+  factory ChatwootEventOld.fromEnvelope(
     String event,
     Map<String, dynamic> data,
   ) {
@@ -38,13 +38,13 @@ sealed class ChatwootEvent {
 }
 
 /// [message.created](https://github.com/chatwoot/chatwoot/blob/v4.8.0/lib/events/types.rb)
-final class ChatwootMessageCreatedEvent extends ChatwootEvent {
+final class ChatwootMessageCreatedEvent extends ChatwootEventOld {
   const ChatwootMessageCreatedEvent(this.message);
   final ChatwootMessageDto message;
 }
 
 /// [message.updated]
-final class ChatwootMessageUpdatedEvent extends ChatwootEvent {
+final class ChatwootMessageUpdatedEvent extends ChatwootEventOld {
   const ChatwootMessageUpdatedEvent({
     required this.message,
     this.previousChanges,
@@ -57,26 +57,26 @@ final class ChatwootMessageUpdatedEvent extends ChatwootEvent {
 }
 
 /// [conversation.created]
-final class ChatwootConversationCreatedEvent extends ChatwootEvent {
+final class ChatwootConversationCreatedEvent extends ChatwootEventOld {
   const ChatwootConversationCreatedEvent(this.conversation);
   final ChatwootConversationPushDto conversation;
 }
 
 /// [conversation.status_changed]
-final class ChatwootConversationStatusChangedEvent extends ChatwootEvent {
+final class ChatwootConversationStatusChangedEvent extends ChatwootEventOld {
   const ChatwootConversationStatusChangedEvent(this.conversation);
   final ChatwootConversationPushDto conversation;
 }
 
 /// [contact.merged] (when delivered on this connection).
-final class ChatwootContactMergedEvent extends ChatwootEvent {
+final class ChatwootContactMergedEvent extends ChatwootEventOld {
   const ChatwootContactMergedEvent(this.merge);
   final ChatwootContactMergedPushDto merge;
 }
 
 /// Прочие имена событий или ошибка разбора известного payload.
 @immutable
-final class ChatwootUnknownEvent extends ChatwootEvent {
+final class ChatwootUnknownEvent extends ChatwootEventOld {
   const ChatwootUnknownEvent(this.name, this.data);
   final String name;
   final Map<String, dynamic> data;

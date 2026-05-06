@@ -6,7 +6,7 @@ import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_contact_session_dto.da
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_contact_session_update_dto.dart';
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_conversation_dto.dart';
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_message_dto.dart';
-import 'package:chatwoot_sdk/client/domain/model/attachment.dart';
+import 'package:chatwoot_sdk/client/domain/model/message/attachment.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
@@ -188,7 +188,7 @@ class HttpChatwootClientApi implements ChatwootClientApi {
     int conversationId, {
     String? content,
     String? echoId,
-    List<Attachment$Local> attachments = const [],
+    List<Attachment$File> attachments = const [],
   }) async {
     final uri = _messagesCollection(contactId, conversationId);
 
