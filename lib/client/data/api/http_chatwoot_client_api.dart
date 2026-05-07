@@ -6,7 +6,7 @@ import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_contact_session_dto.da
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_contact_session_update_dto.dart';
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_conversation_dto.dart';
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_message_dto.dart';
-import 'package:chatwoot_sdk/client/domain/model/message/attachment.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
@@ -43,6 +43,11 @@ class HttpChatwootClientApi implements ChatwootClientApi {
   Uri _conversationMember(String contactId, int conversationId) => _resolve(
     'inboxes/${Uri.encodeComponent(_inboxIdentifier)}/contacts/${Uri.encodeComponent(contactId)}/conversations/$conversationId',
   );
+
+  Uri _conversationMemberAction(String contactId, int conversationId, String action) {
+    final base = _conversationMember(contactId, conversationId);
+    return base.replace(path: '${base.path}/$action');
+  }
 
   Uri _messagesCollection(String contactId, int conversationId, {String? before}) {
     final base = _resolve(
@@ -188,7 +193,7 @@ class HttpChatwootClientApi implements ChatwootClientApi {
     int conversationId, {
     String? content,
     String? echoId,
-    List<Attachment$File> attachments = const [],
+    List<XFile> attachments = const [],
   }) async {
     final uri = _messagesCollection(contactId, conversationId);
 
@@ -212,10 +217,10 @@ class HttpChatwootClientApi implements ChatwootClientApi {
         'echo_id': ?echoId,
       });
 
-    for (final part in attachments) {
+    for (final file in attachments) {
       final MediaType? ct;
 
-      if (part.file.mimeType case final mimeType?) {
+      if (file.mimeType case final mimeType?) {
         ct = MediaType.parse(mimeType);
       } else {
         ct = null;
@@ -223,8 +228,8 @@ class HttpChatwootClientApi implements ChatwootClientApi {
       request.files.add(
         http.MultipartFile.fromBytes(
           'attachments[]',
-          await part.file.readAsBytes(),
-          filename: part.file.name,
+          await file.readAsBytes(),
+          filename: file.name,
           contentType: ct,
         ),
       );
@@ -249,6 +254,40 @@ class HttpChatwootClientApi implements ChatwootClientApi {
     final data = _decodeJson(response);
     final list = data as List<dynamic>;
     return list.map((e) => ChatwootMessageDto.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+  }
+
+  @override
+  Future<void> toggleConversationResolved(String contactId, int conversationId) async {
+    final response = await _client.post(
+      _conversationMemberAction(contactId, conversationId, 'toggle_status'),
+      headers: _jsonHeaders,
+    );
+    _ensureSuccess(response);
+  }
+
+  @override
+  Future<void> toggleConversationTyping(
+    String contactId,
+    int conversationId, {
+    required bool isTyping,
+  }) async {
+    final response = await _client.post(
+      _conversationMemberAction(contactId, conversationId, 'toggle_typing'),
+      headers: _jsonHeaders,
+      body: jsonEncode(<String, dynamic>{
+        'typing_status': isTyping ? 'on' : 'off',
+      }),
+    );
+    _ensureSuccess(response);
+  }
+
+  @override
+  Future<void> updateConversationLastSeen(String contactId, int conversationId) async {
+    final response = await _client.post(
+      _conversationMemberAction(contactId, conversationId, 'update_last_seen'),
+      headers: _jsonHeaders,
+    );
+    _ensureSuccess(response);
   }
 
   /* #endregion */

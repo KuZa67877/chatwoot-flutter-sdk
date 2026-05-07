@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:chatwoot_sdk/chatwoot_sdk.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,14 +9,34 @@ class SharedPreferencesSessionStorage implements SessionStorage {
 
   final SharedPreferencesAsync _preferences;
 
+  static const _key = 'chatwoot_session';
+
   @override
-  Future<String?> read() async {
-    return _preferences.getString('session');
+  Future<StoredChatwootSession?> read() async {
+    final raw = await _preferences.getString(_key);
+    if (raw == null || raw.isEmpty) {
+      return null;
+    }
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      return StoredChatwootSession(
+        sourceId: map['sourceId'] as String,
+        identifier: map['identifier'] as String,
+      );
+    } on Object {
+      return null;
+    }
   }
 
   @override
-  Future<void> save(String sessionId) async {
-    await _preferences.setString('session', sessionId);
+  Future<void> save(StoredChatwootSession session) async {
+    await _preferences.setString(
+      _key,
+      jsonEncode(<String, String>{
+        'sourceId': session.sourceId,
+        'identifier': session.identifier,
+      }),
+    );
   }
 }
 
@@ -37,7 +59,7 @@ class _ChatwootExampleRootState extends State<ChatwootExampleRoot> {
     super.initState();
     const inboxIdentifier = String.fromEnvironment('CHATWOOT_INBOX_IDENTIFIER');
     const baseUrlString = String.fromEnvironment('CHATWOOT_BASE_URL');
-    _client = ChatwootClient(
+    _client = ChatwootClientImpl.withHttpSocket(
       inboxIdentifier: inboxIdentifier,
       baseUrl: Uri.parse(baseUrlString),
       sessionStorage: SharedPreferencesSessionStorage(preferences: SharedPreferencesAsync()),
@@ -48,7 +70,7 @@ class _ChatwootExampleRootState extends State<ChatwootExampleRoot> {
   Future<void> _bootstrap() async {
     final client = _client;
     try {
-      await client.init();
+      await client.bootstrap();
       if (mounted) {
         setState(() => _ready = true);
       }
@@ -101,7 +123,7 @@ class ConversationListPage extends StatelessWidget {
     };
   }
 
-  Future<void> _openChat(BuildContext context, int conversationId) async {
+  Future<void> _openChat(BuildContext context, ChatwootConversationId conversationId) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (context) => ConversationChatPage(
@@ -199,7 +221,7 @@ class ConversationChatPage extends StatefulWidget {
   });
 
   final ChatwootClient client;
-  final int conversationId;
+  final ChatwootConversationId conversationId;
 
   @override
   State<ConversationChatPage> createState() => _ConversationChatPageState();
@@ -283,7 +305,7 @@ class _ConversationChatPageState extends State<ConversationChatPage> {
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
                     final m = messages[index];
-                    final outgoing = m is ChatwootMessage$Outgoing;
+                    final outgoing = m is ChatwootMessage$Content$Outgoing;
                     final bg = outgoing
                         ? Theme.of(context).colorScheme.primaryContainer
                         : Theme.of(context).colorScheme.surfaceContainerHighest;
@@ -313,16 +335,16 @@ class _ConversationChatPageState extends State<ConversationChatPage> {
                                       style: Theme.of(context).textTheme.labelSmall,
                                     ),
                                   ),
-                                if (failed && echoId != null)
+                                if (failed && echoId != null && outgoing)
                                   Align(
                                     alignment: Alignment.centerRight,
                                     child: TextButton(
                                       onPressed: () async {
                                         try {
-                                          // await widget.client.retryMessage(
-                                          //   conversationId: widget.conversationId,
-                                          //   echoId: echoId,
-                                          // );
+                                          await widget.client.retryMessage(
+                                            conversationId: widget.conversationId,
+                                            message: m,
+                                          );
                                         } catch (e) {
                                           if (context.mounted) {
                                             ScaffoldMessenger.of(context).showSnackBar(

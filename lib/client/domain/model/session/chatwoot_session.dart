@@ -16,6 +16,18 @@ class ChatwootSession {
 
   final ChatwootContact contact;
 
+  ChatwootSession copyWith({
+    ContactInboxId? id,
+    String? token,
+    ChatwootContact? contact,
+  }) {
+    return ChatwootSession(
+      id: id ?? this.id,
+      token: token ?? this.token,
+      contact: contact ?? this.contact,
+    );
+  }
+
   @override
   String toString() =>
       'ChatwootSession('

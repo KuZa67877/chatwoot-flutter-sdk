@@ -1,5 +1,7 @@
-abstract interface class SessionStorage {
-  Future<String?> read();
+import 'package:chatwoot_sdk/client/data/session_storage/stored_chatwoot_session.dart';
 
-  Future<void> save(String sessionId);
+abstract interface class SessionStorage {
+  Future<StoredChatwootSession?> read();
+
+  Future<void> save(StoredChatwootSession session);
 }

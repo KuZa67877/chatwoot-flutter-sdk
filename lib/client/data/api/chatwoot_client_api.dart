@@ -2,7 +2,7 @@ import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_contact_session_dto.da
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_contact_session_update_dto.dart';
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_conversation_dto.dart';
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_message_dto.dart';
-import 'package:chatwoot_sdk/client/domain/model/message/attachment.dart';
+import 'package:cross_file/cross_file.dart';
 
 abstract interface class ChatwootClientApi {
   Future<ChatwootContactSessionDto> createContactSession({
@@ -52,6 +52,25 @@ abstract interface class ChatwootClientApi {
     int conversationId, {
     String? content,
     String? echoId,
-    List<Attachment$File> attachments = const [],
+    List<XFile> attachments = const [],
   });
+
+  /// Public Client API: resolves the conversation for the contact (`POST …/toggle_status`).
+  Future<void> toggleConversationResolved(
+    String contactId,
+    int conversationId,
+  );
+
+  /// Public Client API: contact typing indicator (`POST …/toggle_typing`).
+  Future<void> toggleConversationTyping(
+    String contactId,
+    int conversationId, {
+    required bool isTyping,
+  });
+
+  /// Public Client API: mark conversation as seen (`POST …/update_last_seen`).
+  Future<void> updateConversationLastSeen(
+    String contactId,
+    int conversationId,
+  );
 }

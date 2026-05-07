@@ -6,7 +6,22 @@ enum ChatwootConversationStatus {
   open,
   resolved,
   pending,
-  snoozed,
+  snoozed;
+
+  factory ChatwootConversationStatus.fromString(String raw) {
+    switch (raw.toLowerCase()) {
+      case 'open':
+        return ChatwootConversationStatus.open;
+      case 'resolved':
+        return ChatwootConversationStatus.resolved;
+      case 'pending':
+        return ChatwootConversationStatus.pending;
+      case 'snoozed':
+        return ChatwootConversationStatus.snoozed;
+      default:
+        return ChatwootConversationStatus.open;
+    }
+  }
 }
 
 extension type ChatwootConversationId(int value) implements int {}
