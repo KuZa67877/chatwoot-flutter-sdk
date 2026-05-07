@@ -1,6 +1,6 @@
 import 'package:meta/meta.dart';
 
-import 'chatwoot_attachment_push_event_dto.dart';
+import 'chatwoot_attachment_dto.dart';
 import 'chatwoot_message_sender_dto.dart';
 import 'chatwoot_public_json.dart';
 
@@ -29,7 +29,7 @@ final class ChatwootMessageDto {
       conversationId: json['conversation_id'] as int,
       attachments:
           (json['attachments'] as List<dynamic>?)
-              ?.map((e) => ChatwootAttachmentPushEventDto.fromJson(e as Json))
+              ?.map((e) => ChatwootAttachmentDto.fromJson(e as Json))
               .toList() ??
           const [],
       sender: json['sender'] != null ? ChatwootPublicMessageSenderDto.fromJson(json['sender'] as Json) : null,
@@ -45,7 +45,7 @@ final class ChatwootMessageDto {
   final Json contentAttributes;
   final int createdAt;
   final int conversationId;
-  final List<ChatwootAttachmentPushEventDto> attachments;
+  final List<ChatwootAttachmentDto> attachments;
   final ChatwootPublicMessageSenderDto? sender;
 
   Json toJson() => {

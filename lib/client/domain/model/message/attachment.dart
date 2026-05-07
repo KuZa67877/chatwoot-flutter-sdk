@@ -18,12 +18,14 @@ class Attachment$File extends Attachment {
 
 class Attachment$Link extends Attachment {
   const Attachment$Link({
-    required this.url,
+    this.url,
     this.thumbnail,
   });
 
-  final Uri? thumbnail;
-  final Uri url;
+  /// Main asset URL; may be null if the server has not exposed a link yet ([ChatwootAttachmentDto.dataUrl]).
+  final Uri? url;
 
-  String toString() => 'Attachment\$Remote(url: $url, thumbnail: $thumbnail)';
+  final Uri? thumbnail;
+
+  String toString() => 'Attachment\$Link(url: $url, thumbnail: $thumbnail)';
 }
