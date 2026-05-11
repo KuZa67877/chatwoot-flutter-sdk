@@ -192,22 +192,14 @@ class ChatwootRealtimeRepository implements ChatwootRepository, ChatwootCable {
     );
 
     try {
-      final dto = await _api.createMessage(
+      await _api.createMessage(
         sourceId,
         conversationId.value,
         content: content,
         echoId: echoId,
         attachments: attachments,
       );
-      _localEvents.add(
-        ChatwootCableEvent$Message$Updated(
-          conversationId: conversationId,
-          message: dto.toDomainMessage(
-            outgoingStatus: OutgoingMessageStatus.delivered,
-          ),
-        ),
-      );
-    } catch (e, st) {
+    } on Object {
       _localEvents.add(
         ChatwootCableEvent$Message$Updated(
           conversationId: conversationId,
@@ -216,7 +208,8 @@ class ChatwootRealtimeRepository implements ChatwootRepository, ChatwootCable {
           ),
         ),
       );
-      Error.throwWithStackTrace(e, st);
+
+      rethrow;
     }
   }
 
@@ -246,33 +239,19 @@ class ChatwootRealtimeRepository implements ChatwootRepository, ChatwootCable {
 
     try {
       final files = message.attachments.whereType<Attachment$File>().map((a) => a.file).toList();
-      final dto = await _api.createMessage(
+      await _api.createMessage(
         sourceId,
         conversationId.value,
         content: message.content,
         echoId: message.echoId,
         attachments: files,
       );
-      _localEvents.add(
-        ChatwootCableEvent$Message$Updated(
-          conversationId: conversationId,
-          message: dto.toDomainMessage(
-            outgoingStatus: OutgoingMessageStatus.delivered,
-          ),
-        ),
-      );
     } on Object {
       _localEvents.add(
         ChatwootCableEvent$Message$Updated(
           conversationId: conversationId,
-          message: ChatwootMessage$Content$Outgoing(
+          message: sending.copyWith(
             status: OutgoingMessageStatus.failed,
-            id: message.id,
-            echoId: message.echoId,
-            sentAt: message.sentAt,
-            content: message.content,
-            attachments: message.attachments,
-            isDeleted: message.isDeleted,
           ),
         ),
       );
@@ -285,10 +264,15 @@ class ChatwootRealtimeRepository implements ChatwootRepository, ChatwootCable {
   Future<void> markPresence({
     required String sourceId,
   }) async {
-    final conversations = await _api.listConversations(sourceId);
-    for (final c in conversations) {
-      await _api.updateConversationLastSeen(sourceId, c.id);
-    }
+    await _socket.markPresence();
+  }
+
+  @override
+  Future<void> markConversationRead({
+    required String sourceId,
+    required ChatwootConversationId conversationId,
+  }) {
+    return _api.updateConversationLastSeen(sourceId, conversationId.value);
   }
 
   @override
@@ -307,10 +291,20 @@ class ChatwootRealtimeRepository implements ChatwootRepository, ChatwootCable {
   Future<ChatwootCableEvent?> _mapSocketEvent(ChatwootSocketEvent event) async {
     switch (event) {
       case ChatwootSocketEvent$Message$Created(:final message):
-        return ChatwootCableEvent$Message$Created(
-          conversationId: ChatwootConversationId(message.conversationId),
-          message: message.toDomainMessage(),
-        );
+        final domainMessage = message.toDomainMessage();
+        switch (domainMessage) {
+          case ChatwootMessage$Activity():
+          case ChatwootMessage$Content$Incoming():
+            return ChatwootCableEvent$Message$Created(
+              conversationId: ChatwootConversationId(message.conversationId),
+              message: domainMessage,
+            );
+          case ChatwootMessage$Content$Outgoing():
+            return ChatwootCableEvent$Message$Updated(
+              conversationId: ChatwootConversationId(message.conversationId),
+              message: domainMessage,
+            );
+        }
       case ChatwootSocketEvent$Message$Updated(:final message):
         return ChatwootCableEvent$Message$Updated(
           conversationId: ChatwootConversationId(message.conversationId),
@@ -321,12 +315,14 @@ class ChatwootRealtimeRepository implements ChatwootRepository, ChatwootCable {
           conversation: conversation.toDomainConversation(),
         );
       case ChatwootSocketEvent$Conversation$TypingOn(:final conversation):
-        return ChatwootCableEvent$TypingOn(
+        return ChatwootCableEvent$Typing(
           conversationId: ChatwootConversationId(conversation.id),
+          isTyping: true,
         );
       case ChatwootSocketEvent$Conversation$TypingOff(:final conversation):
-        return ChatwootCableEvent$TypingOff(
+        return ChatwootCableEvent$Typing(
           conversationId: ChatwootConversationId(conversation.id),
+          isTyping: false,
         );
     }
   }
@@ -356,7 +352,7 @@ extension ChatwootMessageDtoDomain on ChatwootMessageDto {
     final sentAt = DateTime.fromMillisecondsSinceEpoch(createdAt, isUtc: true).toLocal();
 
     switch (messageType) {
-      case 1:
+      case 0:
         return ChatwootMessage$Content$Outgoing(
           status: outgoingStatus ?? OutgoingMessageStatus.delivered,
           id: id,
@@ -366,8 +362,7 @@ extension ChatwootMessageDtoDomain on ChatwootMessageDto {
           attachments: attachments.map((a) => a.toDomainLink()).toList(),
           isDeleted: deleted,
         );
-      case 0:
-      case 3:
+      case 1:
         return ChatwootMessage$Content$Incoming(
           id: id,
           echoId: echoId,
@@ -377,7 +372,7 @@ extension ChatwootMessageDtoDomain on ChatwootMessageDto {
           content: content,
           attachments: attachments.map((a) => a.toDomainLink()).toList(),
         );
-      case 2:
+      case 3:
         return ChatwootMessage$Activity(
           id: id,
           echoId: echoId,
@@ -410,11 +405,14 @@ extension on ChatwootPublicMessageSenderDto {
 
 extension ChatwootConversationDtoDomain on ChatwootConversationDto {
   ChatwootConversation toDomainConversation() {
+    final domainMessages = messages.map((m) => m.toDomainMessage()).toList();
+
     return ChatwootConversation(
       id: ChatwootConversationId(id),
       status: ChatwootConversationStatus.fromString(status),
-      messages: messages.map((m) => m.toDomainMessage()).toList(),
+      messages: domainMessages,
       supportTyping: false,
+      lastReadTime: DateTime.fromMillisecondsSinceEpoch(contactLastSeenAt, isUtc: true).toLocal(),
     );
   }
 }

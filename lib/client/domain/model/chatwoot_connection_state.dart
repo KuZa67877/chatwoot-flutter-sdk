@@ -3,7 +3,11 @@ sealed class ChatwootConnectionState {
 }
 
 class ChatwootConnectionState$Connected extends ChatwootConnectionState {
-  const ChatwootConnectionState$Connected();
+  const ChatwootConnectionState$Connected({
+    this.isReconnected = false,
+  });
+
+  final bool isReconnected;
 }
 
 class ChatwootConnectionState$Disconnected extends ChatwootConnectionState {

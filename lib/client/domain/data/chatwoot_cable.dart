@@ -53,18 +53,12 @@ class ChatwootCableEvent$ConversationStatusChanged extends ChatwootCableEvent {
   final ChatwootConversation conversation;
 }
 
-class ChatwootCableEvent$TypingOn extends ChatwootCableEvent {
-  const ChatwootCableEvent$TypingOn({
+class ChatwootCableEvent$Typing extends ChatwootCableEvent {
+  const ChatwootCableEvent$Typing({
     required this.conversationId,
+    required this.isTyping,
   });
 
   final ChatwootConversationId conversationId;
-}
-
-class ChatwootCableEvent$TypingOff extends ChatwootCableEvent {
-  const ChatwootCableEvent$TypingOff({
-    required this.conversationId,
-  });
-
-  final ChatwootConversationId conversationId;
+  final bool isTyping;
 }

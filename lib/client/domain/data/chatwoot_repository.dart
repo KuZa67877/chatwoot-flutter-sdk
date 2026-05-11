@@ -50,6 +50,11 @@ abstract interface class ChatwootRepository {
     required String sourceId,
   });
 
+  Future<void> markConversationRead({
+    required String sourceId,
+    required ChatwootConversationId conversationId,
+  });
+
   Future<void> toggleTyping({
     required String sourceId,
     required ChatwootConversationId conversationId,

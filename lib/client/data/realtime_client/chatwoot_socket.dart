@@ -15,6 +15,8 @@ abstract interface class ChatwootSocket {
     required String pubsubToken,
   });
 
+  Future<void> markPresence();
+
   Future<void> disconnect();
 }
 

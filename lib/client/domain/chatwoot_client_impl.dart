@@ -9,7 +9,7 @@ import 'package:chatwoot_sdk/client/domain/chatwoot_realtime_repository.dart';
 import 'package:chatwoot_sdk/client/domain/data/chatwoot_cable.dart';
 import 'package:chatwoot_sdk/client/domain/data/chatwoot_repository.dart';
 import 'package:chatwoot_sdk/client/domain/model/chatwoot_connection_state.dart';
-import 'package:chatwoot_sdk/client/domain/model/chatwoot_event.dart';
+import 'package:chatwoot_sdk/client/domain/model/chatwoot_state.dart';
 import 'package:chatwoot_sdk/client/domain/model/conversation/chatwoot_conversation.dart';
 import 'package:chatwoot_sdk/client/domain/model/message/chatwoot_message.dart';
 import 'package:chatwoot_sdk/client/domain/model/session/authorization_creds.dart';
@@ -20,18 +20,13 @@ import 'package:rxdart/rxdart.dart';
 
 /// Stateful facade over [`ChatwootRepository`] + [`ChatwootCable`].
 class ChatwootClientImpl implements ChatwootClient {
-  ChatwootClientImpl({
-    required ChatwootRepository repository,
-    required ChatwootCable cable,
-  }) : _repository = repository,
-       _cable = cable;
-
   /// Wires HTTP API, socket and [`ChatwootRealtimeRepository`] from inbox settings.
   factory ChatwootClientImpl.withHttpSocket({
     required Uri baseUrl,
     required String inboxIdentifier,
     required SessionStorage sessionStorage,
     ChatwootSocketRetryPolicy? retryPolicy,
+    required AuthorizationCreds defaultCreds,
   }) {
     final api = HttpChatwootClientApi(
       baseUrl: baseUrl,
@@ -46,34 +41,51 @@ class ChatwootClientImpl implements ChatwootClient {
       api: api,
       sessionStorage: sessionStorage,
     );
-    return ChatwootClientImpl(repository: gateway, cable: gateway);
+    return ChatwootClientImpl(
+      repository: gateway,
+      cable: gateway,
+      defaultCreds: defaultCreds,
+    );
   }
+
+  ChatwootClientImpl({
+    required ChatwootRepository repository,
+    required ChatwootCable cable,
+    required AuthorizationCreds defaultCreds,
+  }) : _repository = repository,
+       _cable = cable,
+       _defaultCreds = defaultCreds;
 
   final ChatwootRepository _repository;
   final ChatwootCable _cable;
 
-  AuthorizationCreds? _defaultCreds;
-  ChatwootSession? _session;
-  bool _hasBootstrapped = false;
+  final AuthorizationCreds _defaultCreds;
 
-  StreamSubscription<ChatwootCableEvent>? _cableSub;
-  Timer? _presenceTimer;
+  ChatwootSession? _session;
+
+  bool _hasBootstrapped = false;
   bool _disposed = false;
 
-  final BehaviorSubject<List<ChatwootConversation>> _conversations = BehaviorSubject<List<ChatwootConversation>>.seeded(
-    const [],
+  StreamSubscription<ChatwootCableEvent>? _cableSub;
+  StreamSubscription<ChatwootConnectionState>? _connectionSub;
+
+  Timer? _presenceTimer;
+
+  final BehaviorSubject<ChatwootState> _stateSubject = BehaviorSubject<ChatwootState>.seeded(
+    const ChatwootState$ConversationsLoaded(conversations: []),
   );
 
-  final PublishSubject<ChatwootEvent> _events = PublishSubject<ChatwootEvent>();
+  @override
+  ChatwootContact get contact => _requireSession.contact;
 
-  static AuthorizationCreds _anonymousCreds() => const AuthorizationCreds(
-    identifier: null,
-    identifierHash: null,
-    name: null,
-    email: null,
-    phoneNumber: null,
-    customAttributes: {},
-  );
+  @override
+  ChatwootState get state => _stateSubject.value;
+
+  @override
+  Stream<ChatwootState> get statesStream => _stateSubject.stream;
+
+  @override
+  Stream<ChatwootConnectionState> get connectionState => _cable.connectionState;
 
   ChatwootSession get _requireSession {
     if (_disposed) {
@@ -91,11 +103,19 @@ class ChatwootClientImpl implements ChatwootClient {
     return s;
   }
 
-  Future<void> _stopCableAndPresence() async {
-    _presenceTimer?.cancel();
-    _presenceTimer = null;
-    await _cableSub?.cancel();
-    _cableSub = null;
+  @override
+  Future<void> bootstrap() async {
+    if (_disposed) {
+      throw StateError('ChatwootClient.dispose() was called.');
+    }
+    await _stopCableAndPresence();
+    await _cable.disconnect();
+
+    ChatwootSession? session = await _repository.currentSession();
+    session ??= await _repository.authorize(_defaultCreds);
+
+    await _attachSession(session);
+    _hasBootstrapped = true;
   }
 
   void _startPresence() {
@@ -117,128 +137,6 @@ class ChatwootClientImpl implements ChatwootClient {
     });
   }
 
-  Future<void> _attachSession(ChatwootSession session) async {
-    _session = session;
-    await _cable.connect(
-      sourceId: session.id.value,
-      pubsubToken: session.token,
-    );
-    final list = await _repository.fetchConversations(sourceId: session.id.value);
-    _conversations.add(list);
-    await _cableSub?.cancel();
-    _cableSub = _cable.events.listen(
-      _onCableEvent,
-      onError: _events.addError,
-    );
-    _startPresence();
-  }
-
-  void _onCableEvent(ChatwootCableEvent event) {
-    switch (event) {
-      case ChatwootCableEvent$Message$Created(:final conversationId, :final message):
-        _applyMessage(conversationId, message, emitNewMessageEvent: true);
-      case ChatwootCableEvent$Message$Updated(:final conversationId, :final message):
-        _applyMessage(conversationId, message, emitNewMessageEvent: false);
-      case ChatwootCableEvent$ConversationStatusChanged(:final conversation):
-        final list = List<ChatwootConversation>.from(_conversations.value);
-        final i = list.indexWhere((c) => c.id == conversation.id);
-        late ChatwootConversation updated;
-        if (i < 0) {
-          updated = conversation;
-          list.add(updated);
-        } else {
-          updated = _mergeConversationPatch(list[i], conversation);
-          list[i] = updated;
-        }
-        _conversations.add(list);
-        _events.add(ChatwootEvent$ConversationStatusChanged(conversation: updated));
-      case ChatwootCableEvent$TypingOn(:final conversationId):
-        _applyTyping(conversationId, true);
-      case ChatwootCableEvent$TypingOff(:final conversationId):
-        _applyTyping(conversationId, false);
-    }
-  }
-
-  void _applyTyping(ChatwootConversationId conversationId, bool typing) {
-    final list = List<ChatwootConversation>.from(_conversations.value);
-    final i = list.indexWhere((c) => c.id == conversationId);
-    if (i < 0) {
-      return;
-    }
-    list[i] = list[i].copyWith(supportTyping: typing);
-    _conversations.add(list);
-  }
-
-  void _applyMessage(
-    ChatwootConversationId conversationId,
-    ChatwootMessage message, {
-    required bool emitNewMessageEvent,
-  }) {
-    final list = List<ChatwootConversation>.from(_conversations.value);
-    final i = list.indexWhere((c) => c.id == conversationId);
-    if (i < 0) {
-      list.add(
-        ChatwootConversation(
-          id: conversationId,
-          status: ChatwootConversationStatus.open,
-          messages: [message],
-          supportTyping: false,
-        ),
-      );
-    } else {
-      final c = list[i];
-      list[i] = c.copyWith(messages: _upsertMessage(c.messages, message));
-    }
-    _conversations.add(list);
-    if (emitNewMessageEvent) {
-      _events.add(ChatwootEvent$NewMessage(message: message));
-    }
-  }
-
-  ChatwootConversation _mergeConversationPatch(
-    ChatwootConversation existing,
-    ChatwootConversation patch,
-  ) {
-    var msgs = existing.messages;
-    for (final m in patch.messages) {
-      msgs = _upsertMessage(msgs, m);
-    }
-    return existing.copyWith(
-      status: patch.status,
-      supportTyping: patch.supportTyping,
-      messages: msgs,
-    );
-  }
-
-  List<ChatwootMessage> _upsertMessage(List<ChatwootMessage> messages, ChatwootMessage incoming) {
-    final idx = messages.indexWhere((m) => m.isSame(incoming));
-    if (idx >= 0) {
-      final copy = List<ChatwootMessage>.from(messages);
-      copy[idx] = incoming;
-      return copy;
-    }
-    return [...messages, incoming];
-  }
-
-  @override
-  Future<void> bootstrap({
-    AuthorizationCreds? defaultCreds,
-  }) async {
-    if (_disposed) {
-      throw StateError('ChatwootClient.dispose() was called.');
-    }
-    await _stopCableAndPresence();
-    await _cable.disconnect();
-
-    _defaultCreds = defaultCreds;
-
-    ChatwootSession? session = await _repository.currentSession();
-    session ??= await _repository.authorize(defaultCreds ?? _anonymousCreds());
-
-    await _attachSession(session);
-    _hasBootstrapped = true;
-  }
-
   @override
   Future<void> authorize(AuthorizationCreds creds) async {
     _requireSession;
@@ -248,20 +146,173 @@ class ChatwootClientImpl implements ChatwootClient {
     await _attachSession(session);
   }
 
+  Future<void> _attachSession(ChatwootSession session) async {
+    _session = session;
+    await _cable.connect(
+      sourceId: session.id.value,
+      pubsubToken: session.token,
+    );
+    final list = await _repository.fetchConversations(sourceId: session.id.value);
+    _stateSubject.add(ChatwootState$ConversationsLoaded(conversations: list));
+    await _cableSub?.cancel();
+    _cableSub = _cable.events.listen(
+      _onCableEvent,
+      onError: (error, stackTrace) {
+        // TODO:
+      },
+    );
+    await _connectionSub?.cancel();
+    _connectionSub = _cable.connectionState.listen(_onConnectionState);
+    _startPresence();
+  }
+
+  void _onConnectionState(ChatwootConnectionState state) {
+    switch (state) {
+      case ChatwootConnectionState$Connected(isReconnected: true):
+        unawaited(refreshConversations());
+      case ChatwootConnectionState$Connected():
+      case ChatwootConnectionState$Disconnected():
+      case ChatwootConnectionState$Reconnecting():
+        return;
+    }
+  }
+
+  void _onCableEvent(ChatwootCableEvent event) async {
+    try {
+      switch (event) {
+        case ChatwootCableEvent$Message$Created(:final conversationId, :final message):
+          final list = List<ChatwootConversation>.from(_stateSubject.value.conversations);
+
+          final (updatedList, updated) = list.updateConversation(
+            conversationId,
+            updater: (c) {
+              return c.copyWith(messages: [...c.messages, message]);
+            },
+          );
+
+          _stateSubject.add(
+            ChatwootState$Message$New(
+              conversations: updatedList,
+              conversationId: conversationId,
+              message: message,
+            ),
+          );
+        case ChatwootCableEvent$Message$Updated(:final conversationId, :final message):
+          final list = List<ChatwootConversation>.from(_stateSubject.value.conversations);
+
+          switch (message) {
+            case ChatwootMessage$Activity():
+            case ChatwootMessage$Content$Incoming():
+              final result = list.updateMessageById(
+                conversationId,
+                message.id,
+                updater: (_) => message,
+              );
+              
+              _stateSubject.add(
+                ChatwootState$Message$Updated(
+                  conversations: result.conversations,
+                  conversationId: conversationId,
+                  message: message,
+                  messageIndex: result.messageIndex,
+                ),
+              );
+            case ChatwootMessage$Content$Outgoing():
+              if (message.echoId case final echoId?) {
+                final result = list.updateMessageByEchoId(
+                  conversationId,
+                  echoId,
+                  updater: (_) => message,
+                );
+
+                _stateSubject.add(
+                  ChatwootState$Message$Updated(
+                    conversations: result.conversations,
+                    conversationId: conversationId,
+                    message: message,
+                    messageIndex: result.messageIndex,
+                  ),
+                );
+              } else {
+                final result = list.updateMessageById(
+                  conversationId,
+                  message.id,
+                  updater: (_) => message,
+                );
+
+                _stateSubject.add(
+                  ChatwootState$Message$Updated(
+                    conversations: result.conversations,
+                    conversationId: conversationId,
+                    message: message,
+                    messageIndex: result.messageIndex,
+                  ),
+                );
+              }
+          }
+        case ChatwootCableEvent$ConversationStatusChanged(:final conversation):
+          final list = List<ChatwootConversation>.from(_stateSubject.value.conversations);
+
+          final (updatedList, updated) = list.updateConversation(
+            conversation.id,
+            updater: (c) {
+              return c.copyWith(
+                status: conversation.status,
+              );
+            },
+          );
+
+          _stateSubject.add(
+            ChatwootState$Conversation$Updated(
+              conversations: updatedList,
+              conversation: updated,
+            ),
+          );
+        case final ChatwootCableEvent$Typing typingEvent:
+          final list = List<ChatwootConversation>.from(_stateSubject.value.conversations);
+
+          final (updatedList, updated) = list.updateConversation(
+            typingEvent.conversationId,
+            updater: (c) {
+              return c.copyWith(supportTyping: typingEvent.isTyping);
+            },
+          );
+
+          _stateSubject.add(
+            ChatwootState$Conversation$Updated(
+              conversations: updatedList,
+              conversation: updated,
+            ),
+          );
+      }
+    } on StateError {
+      await refreshConversations();
+    }
+  }
+
   @override
   Future<void> logout() async {
     _requireSession;
     await _stopCableAndPresence();
     await _cable.disconnect();
-    final session = await _repository.authorize(_defaultCreds ?? _anonymousCreds());
+    final session = await _repository.authorize(_defaultCreds);
     await _attachSession(session);
+  }
+
+  Future<void> _stopCableAndPresence() async {
+    _presenceTimer?.cancel();
+    _presenceTimer = null;
+    await _cableSub?.cancel();
+    _cableSub = null;
+    await _connectionSub?.cancel();
+    _connectionSub = null;
   }
 
   @override
   Future<void> refreshConversations() async {
     final id = _requireSession.id.value;
     final list = await _repository.fetchConversations(sourceId: id);
-    _conversations.add(list);
+    _stateSubject.add(ChatwootState$ConversationsLoaded(conversations: list));
   }
 
   @override
@@ -286,25 +337,11 @@ class ChatwootClientImpl implements ChatwootClient {
   }
 
   @override
-  ChatwootContact get contact => _requireSession.contact;
-
-  @override
-  Stream<ChatwootEvent> get events => _events.stream;
-
-  @override
-  Stream<ChatwootConnectionState> get connectionState => _cable.connectionState;
-
-  @override
-  Stream<List<ChatwootConversation>> get conversations => _conversations.stream;
-
-  @override
   Future<ChatwootConversation> createConversation() async {
     final created = await _repository.createConversation(sourceId: _requireSession.id.value);
-    final list = List<ChatwootConversation>.from(_conversations.value);
-    if (!list.any((c) => c.id == created.id)) {
-      list.add(created);
-      _conversations.add(list);
-    }
+
+    await refreshConversations();
+
     return created;
   }
 
@@ -312,19 +349,50 @@ class ChatwootClientImpl implements ChatwootClient {
   Future<void> resolveConversation({
     required ChatwootConversationId id,
   }) async {
-    final updated = await _repository.resolveConversation(
+    final result = await _repository.resolveConversation(
       sourceId: _requireSession.id.value,
       conversationId: id,
     );
-    final list = List<ChatwootConversation>.from(_conversations.value);
-    final i = list.indexWhere((c) => c.id == id);
-    if (i >= 0) {
-      list[i] = updated;
-    } else {
-      list.add(updated);
+
+    final list = List<ChatwootConversation>.from(_stateSubject.value.conversations);
+    try {
+      final (updatedList, updated) = list.updateConversation(id, updater: (_) => result);
+      _stateSubject.add(
+        ChatwootState$Conversation$Updated(
+          conversations: updatedList,
+          conversation: updated,
+        ),
+      );
+    } on StateError {
+      await refreshConversations();
     }
-    _conversations.add(list);
-    _events.add(ChatwootEvent$ConversationStatusChanged(conversation: updated));
+  }
+
+  @override
+  Future<void> markConversationRead({
+    required ChatwootConversationId id,
+  }) async {
+    await _repository.markConversationRead(
+      sourceId: _requireSession.id.value,
+      conversationId: id,
+    );
+
+    final list = List<ChatwootConversation>.from(_stateSubject.value.conversations);
+
+    try {
+      final (updatedList, updated) = list.updateConversation(
+        id,
+        updater: (c) => c.copyWith(lastReadTime: DateTime.now()),
+      );
+      _stateSubject.add(
+        ChatwootState$Conversation$Updated(
+          conversations: updatedList,
+          conversation: updated,
+        ),
+      );
+    } on StateError {
+      await refreshConversations();
+    }
   }
 
   @override
@@ -373,7 +441,92 @@ class ChatwootClientImpl implements ChatwootClient {
     _disposed = true;
     await _stopCableAndPresence();
     await _cable.disconnect();
-    await _conversations.close();
-    await _events.close();
+    await _stateSubject.close();
   }
 }
+
+extension on List<ChatwootConversation> {
+  (List<ChatwootConversation>, ChatwootConversation) updateConversation(
+    int id, {
+    required ChatwootConversation Function(ChatwootConversation) updater,
+  }) {
+    final i = indexWhere((c) => c.id == id);
+    if (i < 0) {
+      throw StateError('Conversation not found: $id');
+    }
+    final updatedList = List<ChatwootConversation>.from(this);
+
+    final updated = updater(updatedList[i]);
+
+    updatedList[i] = updated;
+
+    return (updatedList, updated);
+  }
+
+  UpdateMessageResult updateMessageById(
+    int conversationId,
+    int id, {
+    required ChatwootMessage Function(ChatwootMessage) updater,
+  }) {
+    return _updateMessage(
+      conversationId,
+      (m) => m.id == id,
+      updater: updater,
+      error: StateError('Message not found: $id'),
+    );
+  }
+
+  UpdateMessageResult updateMessageByEchoId(
+    int conversationId,
+    String echoId, {
+    required ChatwootMessage Function(ChatwootMessage) updater,
+  }) {
+    return _updateMessage(
+      conversationId,
+      (m) => m.echoId == echoId,
+      updater: updater,
+      error: StateError('Message not found: $echoId'),
+    );
+  }
+
+  UpdateMessageResult _updateMessage(
+    int conversationId,
+    bool Function(ChatwootMessage) messageChecker, {
+    required ChatwootMessage Function(ChatwootMessage) updater,
+    required Error error,
+  }) {
+    final conversationIndex = indexWhere((c) => c.id == conversationId);
+    if (conversationIndex < 0) {
+      throw StateError('Conversation not found: $conversationId');
+    }
+    final conversations = List<ChatwootConversation>.from(this);
+    final conversation = conversations[conversationIndex];
+    final messages = conversation.messages;
+
+    final messageIndex = messages.indexWhere(messageChecker);
+    if (messageIndex < 0) {
+      throw error;
+    }
+
+    final newMessages = List<ChatwootMessage>.from(messages);
+    final updatedMessage = updater(newMessages[messageIndex]);
+    newMessages[messageIndex] = updatedMessage;
+
+    final updatedConversation = conversation.copyWith(messages: newMessages);
+    conversations[conversationIndex] = updatedConversation;
+
+    return (
+      conversations: conversations,
+      conversationIndex: conversationIndex,
+      messageIndex: messageIndex,
+      updatedMessage: updatedMessage,
+    );
+  }
+}
+
+typedef UpdateMessageResult = ({
+  List<ChatwootConversation> conversations,
+  int conversationIndex,
+  int messageIndex,
+  ChatwootMessage updatedMessage,
+});

@@ -32,7 +32,7 @@ sealed class ChatwootMessage implements Comparable<ChatwootMessage> {
       return time;
     }
 
-    return content?.compareTo(other.content ?? '') ?? 0;
+    return id.compareTo(other.id);
   }
 }
 

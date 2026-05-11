@@ -30,12 +30,13 @@ class ChatwootSocketImpl implements ChatwootSocket {
 
   int _generation = 0;
   bool _userDisconnected = false;
-  bool _everHadSubscription = false;
 
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
+  String? _pubsubToken;
 
   Completer<void>? _connectCompleter;
+  Completer<void>? _reconnectWaitCancel;
 
   @override
   Stream<ChatwootConnectionState> get connectionState => _connectionState.stream;
@@ -54,6 +55,7 @@ class ChatwootSocketImpl implements ChatwootSocket {
 
     _generation++;
     final gen = _generation;
+    _cancelReconnectWait();
 
     if (_connectCompleter != null && !_connectCompleter!.isCompleted) {
       _connectCompleter!.complete();
@@ -78,7 +80,7 @@ class ChatwootSocketImpl implements ChatwootSocket {
   Future<void> disconnect() async {
     _userDisconnected = true;
     _generation++;
-    _everHadSubscription = false;
+    _cancelReconnectWait();
 
     await _disposeSocket();
 
@@ -92,12 +94,24 @@ class ChatwootSocketImpl implements ChatwootSocket {
     }
   }
 
+  @override
+  Future<void> markPresence() async {
+    final channel = _channel;
+    final pubsubToken = _pubsubToken;
+    if (channel == null || pubsubToken == null) {
+      throw StateError('websocket is not connected');
+    }
+
+    channel.sink.add(_messageJson(pubsubToken, const {'action': 'update_presence'}));
+  }
+
   Future<void> _runLoop(int gen, String pubsubToken) async {
     final rng = Random();
     var attempt = 0;
+    var reconnectingAfterDrop = false;
 
     while (!_userDisconnected && gen == _generation) {
-      if (_everHadSubscription) {
+      if (reconnectingAfterDrop) {
         if (!_connectionState.isClosed) {
           _connectionState.add(const ChatwootConnectionState$Reconnecting());
         }
@@ -105,7 +119,11 @@ class ChatwootSocketImpl implements ChatwootSocket {
 
       var sessionSucceeded = false;
       try {
-        await _singleSocketLifetime(gen, pubsubToken);
+        await _singleSocketLifetime(
+          gen,
+          pubsubToken,
+          isReconnected: reconnectingAfterDrop,
+        );
         sessionSucceeded = true;
       } on Object catch (_) {
         // Expected on subscribe failure, abort, or wire errors before confirmation.
@@ -117,21 +135,49 @@ class ChatwootSocketImpl implements ChatwootSocket {
 
       if (sessionSucceeded) {
         attempt = 0;
+        reconnectingAfterDrop = true;
       }
 
-      final delay = _retryPolicy.delayBeforeReconnect(attempt, rng);
+      final reconnectWaitCancel = Completer<void>();
+      _reconnectWaitCancel = reconnectWaitCancel;
+      try {
+        await _retryPolicy.waitBeforeReconnect(
+          ChatwootSocketRetryContext(
+            attemptIndex: attempt,
+            random: rng,
+            cancelled: reconnectWaitCancel.future,
+            previousSessionSucceeded: sessionSucceeded,
+          ),
+        );
+      } finally {
+        if (identical(_reconnectWaitCancel, reconnectWaitCancel)) {
+          _reconnectWaitCancel = null;
+        }
+      }
+
       if (!sessionSucceeded) {
         attempt++;
       }
 
-      await Future<void>.delayed(delay);
       if (_userDisconnected || gen != _generation) {
         break;
       }
     }
   }
 
-  Future<void> _singleSocketLifetime(int gen, String pubsubToken) async {
+  void _cancelReconnectWait() {
+    final reconnectWaitCancel = _reconnectWaitCancel;
+    _reconnectWaitCancel = null;
+    if (reconnectWaitCancel != null && !reconnectWaitCancel.isCompleted) {
+      reconnectWaitCancel.complete();
+    }
+  }
+
+  Future<void> _singleSocketLifetime(
+    int gen,
+    String pubsubToken, {
+    required bool isReconnected,
+  }) async {
     if (pubsubToken.isEmpty) {
       throw StateError('pubsubToken empty');
     }
@@ -139,6 +185,7 @@ class ChatwootSocketImpl implements ChatwootSocket {
     final uri = chatwootCableUri(_baseUrl, pubsubToken);
     final channel = WebSocketChannel.connect(uri);
     _channel = channel;
+    _pubsubToken = pubsubToken;
 
     final confirm = Completer<void>();
     final ended = Completer<void>();
@@ -181,9 +228,8 @@ class ChatwootSocketImpl implements ChatwootSocket {
       throw StateError('aborted');
     }
 
-    _everHadSubscription = true;
     if (!_connectionState.isClosed) {
-      _connectionState.add(const ChatwootConnectionState$Connected());
+      _connectionState.add(ChatwootConnectionState$Connected(isReconnected: isReconnected));
     }
 
     if (_connectCompleter != null && !_connectCompleter!.isCompleted) {
@@ -203,6 +249,18 @@ class ChatwootSocketImpl implements ChatwootSocket {
       'pubsub_token': pubsubToken,
     });
     return jsonEncode({'command': 'subscribe', 'identifier': identifier});
+  }
+
+  static String _messageJson(String pubsubToken, Map<String, Object?> data) {
+    final identifier = jsonEncode({
+      'channel': 'RoomChannel',
+      'pubsub_token': pubsubToken,
+    });
+    return jsonEncode({
+      'command': 'message',
+      'identifier': identifier,
+      'data': jsonEncode(data),
+    });
   }
 
   void _handleWireMessage(
@@ -328,5 +386,6 @@ class ChatwootSocketImpl implements ChatwootSocket {
     _subscription = null;
     await _channel?.sink.close();
     _channel = null;
+    _pubsubToken = null;
   }
 }

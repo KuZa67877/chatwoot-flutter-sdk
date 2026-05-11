@@ -9,7 +9,6 @@ Uri chatwootCableUri(Uri baseUrl, String pubsubToken) {
     scheme: scheme,
     path: _cablePath(baseUrl.path),
     queryParameters: {'pubsub_token': pubsubToken},
-    fragment: '',
   );
 }
 
