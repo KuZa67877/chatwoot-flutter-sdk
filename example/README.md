@@ -1,16 +1,40 @@
-# example
+# Chatwoot SDK example app
 
-An example project for chatwoot client sdk
+This app demonstrates [`ChatwootClient`](https://pub.dev/packages/chatwoot_sdk) from the local `chatwoot_sdk` package.
 
-## Getting Started
+The chat UI is built with [**flutter_chat_ui**](https://pub.dev/packages/flutter_chat_ui) / `flutter_chat_core`: the `Chat` widget, `InMemoryChatController`, and messages mapped from the SDK domain models.
 
-This project is a starting point for a Flutter application.
+## Running
 
-A few resources to get you started if this is your first Flutter project:
+From the `example/` directory:
 
-- [Lab: Write your first Flutter app](https://flutter.dev/docs/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://flutter.dev/docs/cookbook)
+```bash
+flutter pub get
+flutter run \
+  --dart-define=CHATWOOT_INBOX_IDENTIFIER=your_inbox_identifier \
+  --dart-define=CHATWOOT_BASE_URL=https://your-chatwoot.example.com/
+```
 
-For help getting started with Flutter, view our
-[online documentation](https://flutter.dev/docs), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Or via a file (see [`.env.example`](.env.example)):
+
+```bash
+cp .env.example .env
+# edit .env
+flutter run --dart-define-from-file=.env
+```
+
+If `CHATWOOT_BASE_URL` is not set, the build falls back to `https://app.chatwoot.com`. Set your own URL for real usage.
+
+## What the example shows
+
+- **`defaultCreds`** and `--dart-define` for identity (`CHATWOOT_IDENTIFIER`, `CHATWOOT_IDENTIFIER_HASH`, name, email, phone).
+- **`bootstrap`**, the **`conversations`** list, **`refreshConversations`**, and **`createConversation`**.
+- **`markConversationRead`**, the **`unreadCount`** counter, and **`resolveConversation`**.
+- Realtime: **`connectionState`** in the header, **`events`** to SnackBar for new messages and conversation status changes.
+- Chat: **`sendMessage`**, **`toggleTyping`**, attachments via **`image_picker`** and **`sendMessage(attachments: ...)`**.
+- Send failure: tap a text bubble marked "Not delivered" to call **`retryMessage`**.
+- Profile (person icon in the AppBar): **`updateContact`**, **`authorize`**, and **`logout`**.
+
+## Platforms
+
+Local image previews from the file system are not used on **web** (`Image.file` is unavailable); HTTP(S) attachments use `Image.network`.
