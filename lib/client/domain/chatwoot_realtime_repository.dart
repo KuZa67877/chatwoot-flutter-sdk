@@ -349,7 +349,7 @@ extension ChatwootMessageDtoDomain on ChatwootMessageDto {
     OutgoingMessageStatus? outgoingStatus,
   }) {
     final deleted = contentAttributes['deleted'] == true;
-    final sentAt = DateTime.fromMillisecondsSinceEpoch(createdAt, isUtc: true).toLocal();
+    final sentAt = DateTime.fromMillisecondsSinceEpoch(createdAt * 1000, isUtc: true).toLocal();
 
     switch (messageType) {
       case 0:
@@ -412,7 +412,7 @@ extension ChatwootConversationDtoDomain on ChatwootConversationDto {
       status: ChatwootConversationStatus.fromString(status),
       messages: domainMessages,
       supportTyping: false,
-      lastReadTime: DateTime.fromMillisecondsSinceEpoch(contactLastSeenAt, isUtc: true).toLocal(),
+      lastReadTime: DateTime.fromMillisecondsSinceEpoch(contactLastSeenAt * 1000, isUtc: true).toLocal(),
     );
   }
 }
