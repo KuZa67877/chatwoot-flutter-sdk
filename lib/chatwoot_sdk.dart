@@ -26,3 +26,4 @@ export 'client/domain/model/message/chatwoot_message.dart';
 export 'client/domain/model/session/authorization_creds.dart';
 export 'client/domain/model/session/chatwoot_contact.dart';
 export 'client/domain/model/session/chatwoot_session.dart';
+export 'client/domain/model/session/chatwoot_session_exception.dart';

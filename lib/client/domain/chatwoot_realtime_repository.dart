@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:chatwoot_sdk/client/data/api/chatwoot_client_api.dart';
+import 'package:chatwoot_sdk/client/data/api/chatwoot_api_exception.dart';
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_contact_session_dto.dart';
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_conversation_dto.dart';
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_message_dto.dart';
@@ -18,6 +19,7 @@ import 'package:chatwoot_sdk/client/domain/model/message/message_sender.dart';
 import 'package:chatwoot_sdk/client/domain/model/session/authorization_creds.dart';
 import 'package:chatwoot_sdk/client/domain/model/session/chatwoot_contact.dart';
 import 'package:chatwoot_sdk/client/domain/model/session/chatwoot_session.dart';
+import 'package:chatwoot_sdk/client/domain/model/session/chatwoot_session_exception.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:uuid/uuid.dart';
 
@@ -128,8 +130,19 @@ class ChatwootRealtimeRepository implements ChatwootRepository, ChatwootCable {
     if (stored == null) {
       return null;
     }
-    final dto = await _api.getContactSession(stored.sourceId);
-    return dto.toDomainSession(identifier: stored.identifier);
+    try {
+      final dto = await _api.getContactSession(stored.sourceId);
+      return dto.toDomainSession(identifier: stored.identifier);
+    } on ChatwootApiException catch (e) {
+      if (e.statusCode == 404) {
+        throw ChatwootSessionException$ContactNotFound(
+          contactId: stored.sourceId,
+          identifier: stored.identifier,
+          cause: e,
+        );
+      }
+      rethrow;
+    }
   }
 
   @override
