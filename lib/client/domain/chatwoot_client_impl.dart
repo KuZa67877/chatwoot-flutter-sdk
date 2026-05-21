@@ -29,6 +29,8 @@ class ChatwootClientImpl implements ChatwootClient {
     ChatwootSocketRetryPolicy? retryPolicy,
     required AuthorizationCreds defaultCreds,
     ChatwootLogger? logger,
+    Duration confirmSubscriptionGracePeriod = ChatwootSocketImpl.defaultConfirmSubscriptionGracePeriod,
+    Duration confirmSubscriptionTimeout = ChatwootSocketImpl.defaultConfirmSubscriptionTimeout,
   }) {
     final api = HttpChatwootClientApi(
       baseUrl: baseUrl,
@@ -38,6 +40,8 @@ class ChatwootClientImpl implements ChatwootClient {
       baseUrl: baseUrl,
       retryPolicy: retryPolicy,
       logger: logger,
+      confirmSubscriptionGracePeriod: confirmSubscriptionGracePeriod,
+      confirmSubscriptionTimeout: confirmSubscriptionTimeout,
     );
     final gateway = ChatwootRealtimeRepository(
       socket: socket,
@@ -219,7 +223,7 @@ class ChatwootClientImpl implements ChatwootClient {
                 message.id,
                 updater: (_) => message,
               );
-              
+
               _stateSubject.add(
                 ChatwootState$Message$Updated(
                   conversations: result.conversations,
