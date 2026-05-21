@@ -94,12 +94,26 @@ class _ConversationChatPageState extends State<ConversationChatPage> {
   }
 
   void _onClientState(ChatwootState state) {
-    _latestConversation = state.conversations.firstWhere((c) => c.id == widget.conversationId);
+    if (state case ChatwootState$Conversation$Deleted(:final conversationId)
+        when conversationId == widget.conversationId) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      return;
+    }
+
+    final conversation = state.conversations.where((c) => c.id == widget.conversationId).firstOrNull;
+    if (conversation == null) {
+      return;
+    }
+    _latestConversation = conversation;
     switch (state) {
       case ChatwootState$ConversationsLoaded(:final conversations):
         _syncConversationList(conversations);
       case ChatwootState$Conversation(:final conversation) when conversation.id == widget.conversationId:
         _syncConversation(conversation);
+      case ChatwootState$Conversation$Deleted():
+        return;
       case ChatwootState$Conversation():
         return;
       case ChatwootState$Message$New(:final conversationId, :final message)
