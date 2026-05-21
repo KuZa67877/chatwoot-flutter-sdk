@@ -16,15 +16,6 @@ final class ChatwootAttachmentDto {
     this.thumbUrl,
   });
 
-  final int id;
-  final String? dataUrl;
-  final String? thumbUrl;
-
-  /// File size in bytes from Chatwoot `file_size`.
-  final int fileSize;
-
-  final String fileType;
-
   factory ChatwootAttachmentDto.fromJson(Json json) {
     return ChatwootAttachmentDto(
       id: (json['id'] as num).toInt(),
@@ -35,6 +26,15 @@ final class ChatwootAttachmentDto {
     );
   }
 
+  final int id;
+  final String? dataUrl;
+  final String? thumbUrl;
+
+  /// File size in bytes from Chatwoot `file_size`.
+  final int fileSize;
+
+  final String fileType;
+
   Json toJson() => {
     'id': id,
     'data_url': ?dataUrl,
@@ -43,6 +43,7 @@ final class ChatwootAttachmentDto {
     'file_type': fileType,
   };
 
+  @factory
   Attachment$Link toDomainLink() {
     final url = Uri.parse(dataUrl!);
     final resolvedFileName = _fileNameFromUri(url) ?? 'attachment-$id';
@@ -58,10 +59,8 @@ final class ChatwootAttachmentDto {
   }
 
   static String? _fileNameFromUri(Uri uri) {
-    if (uri.pathSegments.isEmpty) {
-      return null;
-    }
-    final value = Uri.decodeComponent(uri.pathSegments.last).trim();
-    return value.isEmpty ? null : value;
+    final segment = uri.pathSegments.isEmpty ? null : uri.pathSegments.last;
+    final value = segment?.trim();
+    return value == null || value.isEmpty ? null : value;
   }
 }
