@@ -186,7 +186,8 @@ class ChatwootRealtimeRepository implements ChatwootRepository, ChatwootCable {
     List<XFile> attachments = const [],
   }) async {
     final echoId = _uuid.v4();
-    final fileAttachments = attachments.map((a) => Attachment$File(file: a)).toList();
+    final fileAttachments = await Future.wait(attachments.map(Attachment$File.fromXFile));
+
     final optimistic = ChatwootMessage$Content$Outgoing(
       status: OutgoingMessageStatus.sending,
       id: _optimisticOutgoingMessageId,

@@ -37,6 +37,7 @@ dependencies:
   flutter_chat_ui: ^2.11.1
   flutter_chat_core: ^2.9.0
   connectivity_plus: ^7.1.1
+  cached_network_image: ^3.4.1
 
 dev_dependencies:
   flutter_test:

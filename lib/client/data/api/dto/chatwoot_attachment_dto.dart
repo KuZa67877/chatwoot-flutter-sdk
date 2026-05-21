@@ -9,42 +9,59 @@ import 'chatwoot_public_json.dart';
 @immutable
 final class ChatwootAttachmentDto {
   const ChatwootAttachmentDto({
+    required this.id,
+    required this.fileSize,
+    required this.fileType,
     this.dataUrl,
     this.thumbUrl,
   });
 
+  final int id;
   final String? dataUrl;
   final String? thumbUrl;
 
+  /// File size in bytes from Chatwoot `file_size`.
+  final int fileSize;
+
+  final String fileType;
+
   factory ChatwootAttachmentDto.fromJson(Json json) {
-    final dataRaw = json['data_url'];
-    final thumbRaw = json['thumb_url'];
     return ChatwootAttachmentDto(
-      dataUrl: dataRaw is String ? dataRaw : null,
-      thumbUrl: thumbRaw is String ? thumbRaw : null,
+      id: (json['id'] as num).toInt(),
+      dataUrl: json['data_url'] as String?,
+      thumbUrl: json['thumb_url'] as String?,
+      fileSize: json['file_size'] as int,
+      fileType: json['file_type'] as String,
     );
   }
 
   Json toJson() => {
-    if (dataUrl != null) 'data_url': dataUrl,
-    if (thumbUrl != null) 'thumb_url': thumbUrl,
+    'id': id,
+    'data_url': ?dataUrl,
+    'thumb_url': ?thumbUrl,
+    'file_size': fileSize,
+    'file_type': fileType,
   };
 
   Attachment$Link toDomainLink() {
+    final url = Uri.parse(dataUrl!);
+    final resolvedFileName = _fileNameFromUri(url) ?? 'attachment-$id';
+
     return Attachment$Link(
-      url: _parseUri(dataUrl),
-      thumbnail: _parseUri(thumbUrl),
+      id: id,
+      url: url,
+      thumbnail: thumbUrl != null ? Uri.tryParse(thumbUrl!) : null,
+      fileName: resolvedFileName,
+      fileSize: fileSize,
+      fileType: AttachmentFileType.fromChatwootValue(fileType),
     );
   }
 
-  static Uri? _parseUri(String? raw) {
-    if (raw == null) {
+  static String? _fileNameFromUri(Uri uri) {
+    if (uri.pathSegments.isEmpty) {
       return null;
     }
-    final trimmed = raw.trim();
-    if (trimmed.isEmpty) {
-      return null;
-    }
-    return Uri.tryParse(trimmed);
+    final value = Uri.decodeComponent(uri.pathSegments.last).trim();
+    return value.isEmpty ? null : value;
   }
 }

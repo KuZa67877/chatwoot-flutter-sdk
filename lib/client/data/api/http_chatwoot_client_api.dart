@@ -6,6 +6,7 @@ import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_contact_session_dto.da
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_contact_session_update_dto.dart';
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_conversation_dto.dart';
 import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_message_dto.dart';
+import 'package:chatwoot_sdk/client/domain/model/message/file_extension.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
@@ -218,19 +219,12 @@ class HttpChatwootClientApi implements ChatwootClientApi {
       });
 
     for (final file in attachments) {
-      final MediaType? ct;
-
-      if (file.mimeType case final mimeType?) {
-        ct = MediaType.parse(mimeType);
-      } else {
-        ct = null;
-      }
       request.files.add(
         http.MultipartFile.fromBytes(
           'attachments[]',
           await file.readAsBytes(),
           filename: file.name,
-          contentType: ct,
+          contentType: file.mediaType,
         ),
       );
     }
@@ -289,6 +283,57 @@ class HttpChatwootClientApi implements ChatwootClientApi {
     );
     _ensureSuccess(response);
   }
-
   /* #endregion */
+}
+
+extension on XFile {
+  MediaType? get mediaType {
+    final mimeType = this.mimeType?.trim();
+    if (mimeType != null && mimeType.isNotEmpty) {
+      return MediaType.parse(mimeType);
+    }
+
+    final extension = FileExtension.fromPath(name) ?? FileExtension.fromPath(path);
+
+    return extension?.mediaType;
+  }
+}
+
+extension on FileExtension {
+  MediaType? get mediaType {
+    switch (this) {
+      case 'jpg':
+      case 'jpeg':
+        return MediaType('image', 'jpeg');
+      case 'png':
+        return MediaType('image', 'png');
+      case 'gif':
+        return MediaType('image', 'gif');
+      case 'webp':
+        return MediaType('image', 'webp');
+      case 'heic':
+        return MediaType('image', 'heic');
+      case 'heif':
+        return MediaType('image', 'heif');
+      case 'mp4':
+      case 'm4v':
+        return MediaType('video', 'mp4');
+      case 'mov':
+        return MediaType('video', 'quicktime');
+      case 'webm':
+        return MediaType('video', 'webm');
+      case 'avi':
+        return MediaType('video', 'x-msvideo');
+      case 'mkv':
+        return MediaType('video', 'x-matroska');
+      case 'pdf':
+        return MediaType('application', 'pdf');
+      case 'txt':
+        return MediaType('text', 'plain');
+      case 'csv':
+        return MediaType('text', 'csv');
+      default:
+        return null;
+    }
+  }
 }
