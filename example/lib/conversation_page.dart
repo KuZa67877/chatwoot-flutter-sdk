@@ -231,6 +231,23 @@ class _ConversationChatPageState extends State<ConversationChatPage> {
     }
   }
 
+  Future<void> _sendTextMessage(String text) async {
+    unawaited(_signalTyping(false));
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+
+    try {
+      await widget.client.sendMessage(
+        conversationId: widget.conversationId,
+        content: trimmed,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Message: $e')));
+      }
+    }
+  }
+
   Future<void> _retryFailed(Message uiMessage) async {
     final conv = _latestConversation;
     if (conv == null) return;
@@ -341,15 +358,7 @@ class _ConversationChatPageState extends State<ConversationChatPage> {
         chatController: _chatController,
         theme: ChatTheme.light(),
         onMessageSend: (text) {
-          unawaited(_signalTyping(false));
-          final trimmed = text.trim();
-          if (trimmed.isEmpty) return;
-          unawaited(
-            widget.client.sendMessage(
-              conversationId: widget.conversationId,
-              content: trimmed,
-            ),
-          );
+          unawaited(_sendTextMessage(text));
         },
         onAttachmentTap: _pickAndSendAttachments,
         onMessageTap: _onMessageTap,

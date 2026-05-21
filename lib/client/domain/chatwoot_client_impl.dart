@@ -358,9 +358,6 @@ class ChatwootClientImpl implements ChatwootClient {
         conversationId: id,
       ),
     );
-    if (result == null) {
-      return;
-    }
 
     final list = List<ChatwootConversation>.from(_stateSubject.value.conversations);
     try {
@@ -381,16 +378,13 @@ class ChatwootClientImpl implements ChatwootClient {
     required ChatwootConversationId id,
   }) async {
     final sourceId = _requireSession.id.value;
-    final wasDeleted = await _handleConversationDeleted(
+    await _handleConversationNotFound(
       conversationId: id,
       action: () => _repository.markConversationRead(
         sourceId: sourceId,
         conversationId: id,
       ),
     );
-    if (wasDeleted) {
-      return;
-    }
 
     final list = List<ChatwootConversation>.from(_stateSubject.value.conversations);
 
@@ -415,7 +409,7 @@ class ChatwootClientImpl implements ChatwootClient {
     required ChatwootConversationId conversationId,
     required bool isTyping,
   }) async {
-    await _handleConversationDeleted(
+    await _handleConversationNotFound(
       conversationId: conversationId,
       action: () => _repository.toggleTyping(
         sourceId: _requireSession.id.value,
@@ -431,7 +425,7 @@ class ChatwootClientImpl implements ChatwootClient {
     String? content,
     List<XFile> attachments = const [],
   }) async {
-    await _handleConversationDeleted(
+    await _handleConversationNotFound(
       conversationId: conversationId,
       action: () => _repository.sendMessage(
         sourceId: _requireSession.id.value,
@@ -447,7 +441,7 @@ class ChatwootClientImpl implements ChatwootClient {
     required ChatwootConversationId conversationId,
     required ChatwootMessage$Content$Outgoing message,
   }) async {
-    await _handleConversationDeleted(
+    await _handleConversationNotFound(
       conversationId: conversationId,
       action: () => _repository.retryMessage(
         sourceId: _requireSession.id.value,
@@ -468,45 +462,47 @@ class ChatwootClientImpl implements ChatwootClient {
     await _stateSubject.close();
   }
 
-  Future<T?> _handleConversationNotFound<T>({
+  Future<T> _handleConversationNotFound<T>({
     required ChatwootConversationId conversationId,
     required Future<T> Function() action,
   }) async {
     try {
       return await action();
     } on ChatwootConversationException$NotFound {
-      await _emitConversationDeleted(conversationId);
-      return null;
+      await _emitConversationDeletedIfPresent(conversationId);
+      rethrow;
     }
   }
 
-  Future<bool> _handleConversationDeleted({
-    required ChatwootConversationId conversationId,
-    required Future<void> Function() action,
-  }) async {
-    try {
-      await action();
-      return false;
-    } on ChatwootConversationException$NotFound {
-      await _emitConversationDeleted(conversationId);
-      return true;
+  Future<void> _emitConversationDeletedIfPresent(ChatwootConversationId conversationId) async {
+    if (!_hasConversation(conversationId)) {
+      return;
     }
-  }
 
-  Future<void> _emitConversationDeleted(ChatwootConversationId conversationId) async {
     List<ChatwootConversation> refreshed;
     try {
-      refreshed = await _repository.fetchConversations(sourceId: _requireSession.id.value);
+      refreshed = List<ChatwootConversation>.from(
+        await _repository.fetchConversations(sourceId: _requireSession.id.value),
+      )..removeWhere((c) => c.id == conversationId);
     } on Object {
       refreshed = List<ChatwootConversation>.from(_stateSubject.value.conversations)
         ..removeWhere((c) => c.id == conversationId);
     }
+
+    if (!_hasConversation(conversationId)) {
+      return;
+    }
+
     _stateSubject.add(
       ChatwootState$Conversation$Deleted(
         conversations: refreshed,
         conversationId: conversationId,
       ),
     );
+  }
+
+  bool _hasConversation(ChatwootConversationId conversationId) {
+    return _stateSubject.value.conversations.any((c) => c.id == conversationId);
   }
 }
 
