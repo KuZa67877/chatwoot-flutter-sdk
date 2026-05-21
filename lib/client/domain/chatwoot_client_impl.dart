@@ -71,6 +71,9 @@ class ChatwootClientImpl implements ChatwootClient {
   StreamSubscription<ChatwootConnectionState>? _connectionSub;
 
   Timer? _presenceTimer;
+  String? _conversationsRefreshSourceId;
+  Future<List<ChatwootConversation>>? _conversationsRefreshFuture;
+  final Set<int> _emittedConversationDeletedIds = <int>{};
 
   final BehaviorSubject<ChatwootState> _stateSubject = BehaviorSubject<ChatwootState>.seeded(
     const ChatwootState$ConversationsLoaded(conversations: []),
@@ -148,6 +151,8 @@ class ChatwootClientImpl implements ChatwootClient {
   }
 
   Future<void> _attachSession(ChatwootSession session) async {
+    _resetConversationsRefresh();
+    _emittedConversationDeletedIds.clear();
     _session = session;
     await _cable.connect(
       sourceId: session.id.value,
@@ -312,7 +317,7 @@ class ChatwootClientImpl implements ChatwootClient {
   @override
   Future<void> refreshConversations() async {
     final id = _requireSession.id.value;
-    final list = await _repository.fetchConversations(sourceId: id);
+    final list = await _fetchConversations(sourceId: id);
     _stateSubject.add(ChatwootState$ConversationsLoaded(conversations: list));
   }
 
@@ -475,21 +480,19 @@ class ChatwootClientImpl implements ChatwootClient {
   }
 
   Future<void> _emitConversationDeletedIfPresent(ChatwootConversationId conversationId) async {
-    if (!_hasConversation(conversationId)) {
+    if (!_hasConversation(conversationId) || _emittedConversationDeletedIds.contains(conversationId.value)) {
       return;
     }
 
     List<ChatwootConversation> refreshed;
     try {
-      refreshed = List<ChatwootConversation>.from(
-        await _repository.fetchConversations(sourceId: _requireSession.id.value),
-      )..removeWhere((c) => c.id == conversationId);
+      refreshed = await _fetchConversations(sourceId: _requireSession.id.value);
     } on Object {
       refreshed = List<ChatwootConversation>.from(_stateSubject.value.conversations)
         ..removeWhere((c) => c.id == conversationId);
     }
 
-    if (!_hasConversation(conversationId)) {
+    if (refreshed.any((c) => c.id == conversationId) || !_emittedConversationDeletedIds.add(conversationId.value)) {
       return;
     }
 
@@ -503,6 +506,38 @@ class ChatwootClientImpl implements ChatwootClient {
 
   bool _hasConversation(ChatwootConversationId conversationId) {
     return _stateSubject.value.conversations.any((c) => c.id == conversationId);
+  }
+
+  Future<List<ChatwootConversation>> _fetchConversations({
+    required String sourceId,
+  }) {
+    final current = _conversationsRefreshFuture;
+    if (current != null && _conversationsRefreshSourceId == sourceId) {
+      return current;
+    }
+
+    late final Future<List<ChatwootConversation>> refresh;
+    refresh = _repository
+        .fetchConversations(sourceId: sourceId)
+        .then((list) {
+          if (identical(_conversationsRefreshFuture, refresh)) {
+            _emittedConversationDeletedIds.removeAll(list.map((c) => c.id.value));
+          }
+          return list;
+        })
+        .whenComplete(() {
+          if (identical(_conversationsRefreshFuture, refresh)) {
+            _resetConversationsRefresh();
+          }
+        });
+    _conversationsRefreshSourceId = sourceId;
+    _conversationsRefreshFuture = refresh;
+    return refresh;
+  }
+
+  void _resetConversationsRefresh() {
+    _conversationsRefreshSourceId = null;
+    _conversationsRefreshFuture = null;
   }
 }
 
