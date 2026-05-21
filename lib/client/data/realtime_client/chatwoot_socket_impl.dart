@@ -7,6 +7,7 @@ import 'package:chatwoot_sdk/client/data/api/dto/chatwoot_message_dto.dart';
 import 'package:chatwoot_sdk/client/data/realtime_client/chatwoot_cable_uri.dart';
 import 'package:chatwoot_sdk/client/data/realtime_client/chatwoot_socket.dart';
 import 'package:chatwoot_sdk/client/data/realtime_client/chatwoot_socket_retry_policy.dart';
+import 'package:chatwoot_sdk/client/domain/logger/chatwoot_logger.dart';
 import 'package:chatwoot_sdk/client/domain/model/chatwoot_connection_state.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -15,8 +16,10 @@ class ChatwootSocketImpl implements ChatwootSocket {
   ChatwootSocketImpl({
     required Uri baseUrl,
     ChatwootSocketRetryPolicy? retryPolicy,
+    ChatwootLogger? logger,
   }) : _baseUrl = baseUrl,
        _retryPolicy = retryPolicy ?? ChatwootSocketRetryPolicy.defaultPolicy,
+       _logger = logger,
        _connectionState = BehaviorSubject<ChatwootConnectionState>.seeded(
          const ChatwootConnectionState$Disconnected(),
        ),
@@ -24,6 +27,7 @@ class ChatwootSocketImpl implements ChatwootSocket {
 
   final Uri _baseUrl;
   final ChatwootSocketRetryPolicy _retryPolicy;
+  final ChatwootLogger? _logger;
 
   final BehaviorSubject<ChatwootConnectionState> _connectionState;
   final PublishSubject<ChatwootSocketEvent> _events;
@@ -125,8 +129,19 @@ class ChatwootSocketImpl implements ChatwootSocket {
           isReconnected: reconnectingAfterDrop,
         );
         sessionSucceeded = true;
-      } on Object catch (_) {
+      } on Object catch (error, stackTrace) {
         // Expected on subscribe failure, abort, or wire errors before confirmation.
+        if (!_userDisconnected && gen == _generation) {
+          _logger?.warning(
+            'Chatwoot socket connection failed.',
+            error: error,
+            stackTrace: stackTrace,
+            extra: {
+              'attempt_index': attempt,
+              'is_reconnect': reconnectingAfterDrop,
+            },
+          );
+        }
       }
 
       if (_userDisconnected || gen != _generation) {

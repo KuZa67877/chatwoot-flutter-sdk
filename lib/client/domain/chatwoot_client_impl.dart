@@ -8,6 +8,7 @@ import 'package:chatwoot_sdk/client/domain/chatwoot_client.dart';
 import 'package:chatwoot_sdk/client/domain/chatwoot_realtime_repository.dart';
 import 'package:chatwoot_sdk/client/domain/data/chatwoot_cable.dart';
 import 'package:chatwoot_sdk/client/domain/data/chatwoot_repository.dart';
+import 'package:chatwoot_sdk/client/domain/logger/chatwoot_logger.dart';
 import 'package:chatwoot_sdk/client/domain/model/chatwoot_connection_state.dart';
 import 'package:chatwoot_sdk/client/domain/model/chatwoot_state.dart';
 import 'package:chatwoot_sdk/client/domain/model/conversation/chatwoot_conversation.dart';
@@ -27,6 +28,7 @@ class ChatwootClientImpl implements ChatwootClient {
     required SessionStorage sessionStorage,
     ChatwootSocketRetryPolicy? retryPolicy,
     required AuthorizationCreds defaultCreds,
+    ChatwootLogger? logger,
   }) {
     final api = HttpChatwootClientApi(
       baseUrl: baseUrl,
@@ -35,6 +37,7 @@ class ChatwootClientImpl implements ChatwootClient {
     final socket = ChatwootSocketImpl(
       baseUrl: baseUrl,
       retryPolicy: retryPolicy,
+      logger: logger,
     );
     final gateway = ChatwootRealtimeRepository(
       socket: socket,
@@ -45,6 +48,7 @@ class ChatwootClientImpl implements ChatwootClient {
       repository: gateway,
       cable: gateway,
       defaultCreds: defaultCreds,
+      logger: logger,
     );
   }
 
@@ -52,14 +56,17 @@ class ChatwootClientImpl implements ChatwootClient {
     required ChatwootRepository repository,
     required ChatwootCable cable,
     required AuthorizationCreds defaultCreds,
+    ChatwootLogger? logger,
   }) : _repository = repository,
        _cable = cable,
-       _defaultCreds = defaultCreds;
+       _defaultCreds = defaultCreds,
+       _logger = logger;
 
   final ChatwootRepository _repository;
   final ChatwootCable _cable;
 
   final AuthorizationCreds _defaultCreds;
+  final ChatwootLogger? _logger;
 
   ChatwootSession? _session;
 
@@ -158,7 +165,11 @@ class ChatwootClientImpl implements ChatwootClient {
     _cableSub = _cable.events.listen(
       _onCableEvent,
       onError: (error, stackTrace) {
-        // TODO:
+        _logger?.warning(
+          'Chatwoot realtime events stream error.',
+          error: error,
+          stackTrace: stackTrace,
+        );
       },
     );
     await _connectionSub?.cancel();
