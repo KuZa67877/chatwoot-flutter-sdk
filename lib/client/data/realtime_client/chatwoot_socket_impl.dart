@@ -21,6 +21,120 @@ final class _SubscriptionNotConfirmed implements Exception {
   String toString() => message;
 }
 
+final class _SubscriptionConfirmation {
+  _SubscriptionConfirmation({
+    required ChatwootLogger? logger,
+    required Duration confirmSubscriptionGracePeriod,
+    required Duration confirmSubscriptionTimeout,
+    required int attemptIndex,
+    required bool isReconnected,
+    required bool Function() isActive,
+    required void Function() releaseConnectWait,
+    required void Function() closeChannel,
+  }) : _logger = logger,
+       _confirmSubscriptionGracePeriod = confirmSubscriptionGracePeriod,
+       _confirmSubscriptionTimeout = confirmSubscriptionTimeout,
+       _attemptIndex = attemptIndex,
+       _isReconnected = isReconnected,
+       _isActive = isActive,
+       _releaseConnectWait = releaseConnectWait,
+       _closeChannel = closeChannel;
+
+  final ChatwootLogger? _logger;
+  final Duration _confirmSubscriptionGracePeriod;
+  final Duration _confirmSubscriptionTimeout;
+  final int _attemptIndex;
+  final bool _isReconnected;
+  final bool Function() _isActive;
+  final void Function() _releaseConnectWait;
+  final void Function() _closeChannel;
+
+  final Completer<void> _completer = Completer<void>();
+  Timer? _confirmSubscriptionTimer;
+  Timer? _confirmAfterPingTimer;
+  bool _pingBeforeConfirmSeen = false;
+
+  Future<void> get future => _completer.future;
+
+  bool get isCompleted => _completer.isCompleted;
+
+  void startTimeout() {
+    _confirmSubscriptionTimer = Timer(_confirmSubscriptionTimeout, () {
+      _failNoConfirmation(
+        message: 'Chatwoot socket subscription was not confirmed in time.',
+        extra: {
+          'timeout_ms': _confirmSubscriptionTimeout.inMilliseconds,
+          'attempt_index': _attemptIndex,
+          'is_reconnect': _isReconnected,
+          'ping_before_confirm_seen': _pingBeforeConfirmSeen,
+        },
+      );
+    });
+  }
+
+  void handlePingBeforeConfirm() {
+    if (isCompleted || _pingBeforeConfirmSeen) {
+      return;
+    }
+
+    _pingBeforeConfirmSeen = true;
+    _confirmAfterPingTimer = Timer(_confirmSubscriptionGracePeriod, () {
+      _failNoConfirmation(
+        message:
+            'Chatwoot socket received ping before subscription confirmation, but confirm_subscription did not arrive in time.',
+        extra: {
+          'grace_period_ms': _confirmSubscriptionGracePeriod.inMilliseconds,
+          'attempt_index': _attemptIndex,
+          'is_reconnect': _isReconnected,
+        },
+      );
+    });
+  }
+
+  void confirm() {
+    if (isCompleted) {
+      return;
+    }
+
+    dispose();
+    _completer.complete();
+  }
+
+  void fail(Object error, [StackTrace? stackTrace]) {
+    if (!_canComplete) {
+      return;
+    }
+
+    _releaseConnectWait();
+    _completer.completeError(error, stackTrace ?? StackTrace.current);
+  }
+
+  void dispose() {
+    _confirmAfterPingTimer?.cancel();
+    _confirmAfterPingTimer = null;
+    _confirmSubscriptionTimer?.cancel();
+    _confirmSubscriptionTimer = null;
+  }
+
+  bool get _canComplete => !isCompleted && _isActive();
+
+  void _failNoConfirmation({
+    required String message,
+    required Map<String, Object?> extra,
+  }) {
+    if (!_canComplete) {
+      return;
+    }
+
+    final error = _SubscriptionNotConfirmed(message);
+    final stackTrace = StackTrace.current;
+    _logger?.warning(message, error: error, stackTrace: stackTrace, extra: extra);
+    _releaseConnectWait();
+    _completer.completeError(error, stackTrace);
+    _closeChannel();
+  }
+}
+
 class ChatwootSocketImpl implements ChatwootSocket {
   static const defaultConfirmSubscriptionGracePeriod = Duration(seconds: 3);
   static const defaultConfirmSubscriptionTimeout = Duration(seconds: 10);
@@ -79,9 +193,7 @@ class ChatwootSocketImpl implements ChatwootSocket {
     final gen = _generation;
     _cancelReconnectWait();
 
-    if (_connectCompleter != null && !_connectCompleter!.isCompleted) {
-      _connectCompleter!.complete();
-    }
+    _releaseConnectWait();
     _connectCompleter = Completer<void>();
     final waitConnected = _connectCompleter!.future;
 
@@ -106,9 +218,7 @@ class ChatwootSocketImpl implements ChatwootSocket {
 
     await _disposeSocket();
 
-    if (_connectCompleter != null && !_connectCompleter!.isCompleted) {
-      _connectCompleter!.complete();
-    }
+    _releaseConnectWait();
     _connectCompleter = null;
 
     if (!_connectionState.isClosed) {
@@ -207,164 +317,102 @@ class ChatwootSocketImpl implements ChatwootSocket {
     }
   }
 
+  void _releaseConnectWait() {
+    if (_connectCompleter != null && !_connectCompleter!.isCompleted) {
+      _connectCompleter!.complete();
+    }
+  }
+
   Future<void> _singleSocketLifetime(
     int gen,
     String pubsubToken, {
     required bool isReconnected,
     required int attemptIndex,
   }) async {
-    if (pubsubToken.isEmpty) {
-      throw StateError('pubsubToken empty');
-    }
-
-    final uri = chatwootCableUri(_baseUrl, pubsubToken);
-    final channel = WebSocketChannel.connect(uri);
-    _channel = channel;
-    _pubsubToken = pubsubToken;
-
-    final confirm = Completer<void>();
-    final ended = Completer<void>();
-    Timer? confirmSubscriptionTimer;
-    Timer? confirmAfterPingTimer;
-    var pingBeforeConfirmSeen = false;
-
-    void releaseConnectWait() {
-      if (_connectCompleter != null && !_connectCompleter!.isCompleted) {
-        _connectCompleter!.complete();
-      }
-    }
-
-    void clearConfirmAfterPingTimeout() {
-      confirmAfterPingTimer?.cancel();
-      confirmAfterPingTimer = null;
-    }
-
-    void clearConfirmSubscriptionTimeout() {
-      confirmSubscriptionTimer?.cancel();
-      confirmSubscriptionTimer = null;
-    }
-
-    void failSubscriptionConfirmation({
-      required String message,
-      required Map<String, Object?> extra,
-    }) {
-      if (confirm.isCompleted || _userDisconnected || gen != _generation) {
-        return;
-      }
-
-      final error = _SubscriptionNotConfirmed(message);
-      final stackTrace = StackTrace.current;
-      _logger?.warning(message, error: error, stackTrace: stackTrace, extra: extra);
-      releaseConnectWait();
-      confirm.completeError(error, stackTrace);
-      unawaited(channel.sink.close());
-    }
-
-    void failBeforeConfirmation(Object error, [StackTrace? stackTrace]) {
-      if (confirm.isCompleted || _userDisconnected || gen != _generation) {
-        return;
-      }
-
-      final resolvedStackTrace = stackTrace ?? StackTrace.current;
-      releaseConnectWait();
-      confirm.completeError(error, resolvedStackTrace);
-    }
-
-    void armConfirmSubscriptionTimeout() {
-      confirmSubscriptionTimer = Timer(_confirmSubscriptionTimeout, () {
-        failSubscriptionConfirmation(
-          message: 'Chatwoot socket subscription was not confirmed in time.',
-          extra: {
-            'timeout_ms': _confirmSubscriptionTimeout.inMilliseconds,
-            'attempt_index': attemptIndex,
-            'is_reconnect': isReconnected,
-            'ping_before_confirm_seen': pingBeforeConfirmSeen,
-          },
-        );
-      });
-    }
-
-    void armConfirmAfterPingTimeout() {
-      if (confirm.isCompleted || pingBeforeConfirmSeen) {
-        return;
-      }
-      pingBeforeConfirmSeen = true;
-      confirmAfterPingTimer = Timer(_confirmSubscriptionGracePeriod, () {
-        failSubscriptionConfirmation(
-          message:
-              'Chatwoot socket received ping before subscription confirmation, but confirm_subscription did not arrive in time.',
-          extra: {
-            'grace_period_ms': _confirmSubscriptionGracePeriod.inMilliseconds,
-            'attempt_index': attemptIndex,
-            'is_reconnect': isReconnected,
-          },
-        );
-      });
-    }
-
-    late final StreamSubscription<dynamic> sub;
-    sub = channel.stream.listen(
-      (dynamic data) {
-        if (_userDisconnected || gen != _generation) {
-          return;
-        }
-        _handleWireMessage(
-          data,
-          channel,
-          confirm,
-          onPingBeforeConfirm: armConfirmAfterPingTimeout,
-          onConfirmSubscription: () {
-            clearConfirmAfterPingTimeout();
-            clearConfirmSubscriptionTimeout();
-          },
-          onBeforeConfirmError: failBeforeConfirmation,
-        );
-      },
-      onError: (Object error, StackTrace stackTrace) {
-        failBeforeConfirmation(error, stackTrace);
-        if (!ended.isCompleted) {
-          ended.complete();
-        }
-      },
-      onDone: () {
-        failBeforeConfirmation(StateError('socket closed before subscription'));
-        if (!ended.isCompleted) {
-          ended.complete();
-        }
-      },
-      cancelOnError: false,
-    );
-    _subscription = sub;
-
-    channel.sink.add(_subscribeJson(pubsubToken));
-    armConfirmSubscriptionTimeout();
-
     try {
-      await confirm.future;
-
-      if (_userDisconnected || gen != _generation) {
-        throw StateError('aborted');
+      if (pubsubToken.isEmpty) {
+        throw StateError('pubsubToken empty');
       }
 
-      if (!_connectionState.isClosed) {
-        _connectionState.add(ChatwootConnectionState$Connected(isReconnected: isReconnected));
-      }
+      final uri = chatwootCableUri(_baseUrl, pubsubToken);
+      final channel = WebSocketChannel.connect(uri);
+      _channel = channel;
+      _pubsubToken = pubsubToken;
 
-      releaseConnectWait();
+      final ended = Completer<void>();
+      final confirmation = _SubscriptionConfirmation(
+        logger: _logger,
+        confirmSubscriptionGracePeriod: _confirmSubscriptionGracePeriod,
+        confirmSubscriptionTimeout: _confirmSubscriptionTimeout,
+        attemptIndex: attemptIndex,
+        isReconnected: isReconnected,
+        isActive: () => !_userDisconnected && gen == _generation,
+        releaseConnectWait: _releaseConnectWait,
+        closeChannel: () => unawaited(channel.sink.close()),
+      );
 
-      await ended.future;
-    } finally {
-      clearConfirmAfterPingTimeout();
-      clearConfirmSubscriptionTimeout();
-      await sub.cancel();
-      if (identical(_subscription, sub)) {
-        _subscription = null;
+      late final StreamSubscription<dynamic> sub;
+      sub = channel.stream.listen(
+        (dynamic data) {
+          if (_userDisconnected || gen != _generation) {
+            return;
+          }
+          _handleWireMessage(
+            data,
+            channel,
+            confirmation,
+          );
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          confirmation.fail(error, stackTrace);
+          if (!ended.isCompleted) {
+            ended.complete();
+          }
+        },
+        onDone: () {
+          confirmation.fail(StateError('socket closed before subscription'));
+          if (!ended.isCompleted) {
+            ended.complete();
+          }
+        },
+        cancelOnError: false,
+      );
+      _subscription = sub;
+
+      channel.sink.add(_subscribeJson(pubsubToken));
+      confirmation.startTimeout();
+
+      try {
+        await confirmation.future;
+
+        if (_userDisconnected || gen != _generation) {
+          throw StateError('aborted');
+        }
+
+        if (!_connectionState.isClosed) {
+          _connectionState.add(ChatwootConnectionState$Connected(isReconnected: isReconnected));
+        }
+
+        _releaseConnectWait();
+
+        await ended.future;
+      } finally {
+        confirmation.dispose();
+        await sub.cancel();
+        if (identical(_subscription, sub)) {
+          _subscription = null;
+        }
+        await channel.sink.close();
+        if (identical(_channel, channel)) {
+          _channel = null;
+          _pubsubToken = null;
+        }
       }
-      await channel.sink.close();
-      if (identical(_channel, channel)) {
-        _channel = null;
-        _pubsubToken = null;
+    } on Object {
+      if (!_userDisconnected && gen == _generation) {
+        _releaseConnectWait();
       }
+      rethrow;
     }
   }
 
@@ -391,11 +439,8 @@ class ChatwootSocketImpl implements ChatwootSocket {
   void _handleWireMessage(
     dynamic data,
     WebSocketChannel channel,
-    Completer<void> confirm, {
-    required void Function() onPingBeforeConfirm,
-    required void Function() onConfirmSubscription,
-    required void Function(Object error, [StackTrace? stackTrace]) onBeforeConfirmError,
-  }) {
+    _SubscriptionConfirmation confirmation,
+  ) {
     final String text;
     if (data is String) {
       text = data;
@@ -423,22 +468,15 @@ class ChatwootSocketImpl implements ChatwootSocket {
       case 'welcome':
         return;
       case 'ping':
-        if (!confirm.isCompleted) {
-          onPingBeforeConfirm();
-        }
+        confirmation.handlePingBeforeConfirm();
         final msg = json['message'];
         channel.sink.add(jsonEncode({'command': 'pong', 'message': msg}));
         return;
       case 'confirm_subscription':
-        onConfirmSubscription();
-        if (!confirm.isCompleted) {
-          confirm.complete();
-        }
+        confirmation.confirm();
         return;
       case 'reject_subscription':
-        if (!confirm.isCompleted) {
-          onBeforeConfirmError(StateError('reject_subscription'));
-        }
+        confirmation.fail(StateError('reject_subscription'));
         return;
       default:
         break;
