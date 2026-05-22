@@ -58,6 +58,8 @@ final class _SubscriptionConfirmation {
 
   bool get isCompleted => _completer.isCompleted;
 
+  bool get _canComplete => !isCompleted && _isActive();
+
   void startTimeout() {
     _confirmSubscriptionTimer = Timer(_confirmSubscriptionTimeout, () {
       _failNoConfirmation(
@@ -91,7 +93,7 @@ final class _SubscriptionConfirmation {
     });
   }
 
-  void confirm() {
+  void confirmIfNotCompleted() {
     if (isCompleted) {
       return;
     }
@@ -115,8 +117,6 @@ final class _SubscriptionConfirmation {
     _confirmSubscriptionTimer?.cancel();
     _confirmSubscriptionTimer = null;
   }
-
-  bool get _canComplete => !isCompleted && _isActive();
 
   void _failNoConfirmation({
     required String message,
@@ -312,14 +312,14 @@ class ChatwootSocketImpl implements ChatwootSocket {
   void _cancelReconnectWait() {
     final reconnectWaitCancel = _reconnectWaitCancel;
     _reconnectWaitCancel = null;
-    if (reconnectWaitCancel != null && !reconnectWaitCancel.isCompleted) {
-      reconnectWaitCancel.complete();
+    if (reconnectWaitCancel case final completer? when !completer.isCompleted) {
+      completer.complete();
     }
   }
 
   void _releaseConnectWait() {
-    if (_connectCompleter != null && !_connectCompleter!.isCompleted) {
-      _connectCompleter!.complete();
+    if (_connectCompleter case final completer? when !completer.isCompleted) {
+      completer.complete();
     }
   }
 
@@ -473,7 +473,7 @@ class ChatwootSocketImpl implements ChatwootSocket {
         channel.sink.add(jsonEncode({'command': 'pong', 'message': msg}));
         return;
       case 'confirm_subscription':
-        confirmation.confirm();
+        confirmation.confirmIfNotCompleted();
         return;
       case 'reject_subscription':
         confirmation.fail(StateError('reject_subscription'));
